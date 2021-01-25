@@ -55,10 +55,10 @@ int main(int argc, char *argv[]) {
   // Get file names
   get_file_names(file_pattern);
 
-  // Read files
+  // Extract data from the files
   clock_t start = clock();
   for (int ii=0; ii<file_names.gl_pathc; ii++){
-    read_file(ii);
+    compute_isf(ii);
   }
   clock_t end = clock();
   printf("Elapsed time: %f seconds\n",
@@ -94,16 +94,48 @@ void get_file_names(char *file_pattern){
 
 }
 
-// ------ Read one file ------
+// ------ Compute intermediate scattering function ------
+void compute_isf(int file_id){
 
-void read_file(int file_id){
-
-  // Variables to store the information contained in the file
-  int time_step = 0; // Time step
+  // Variables to store the information read from the file
+  int time_step = 0; // Timestep
   int n_atoms = 0; // Number of atoms
-  double *sim_box = NULL; // Simulation box;
-  double *xx = NULL, *yy = NULL, *zz = NULL; // Atoms coordinates
-  double *vx = NULL, *vy = NULL, *vz = NULL; // Atoms velocities
+  double *sim_box = NULL; // Simulation box
+  double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
+  double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
+
+  // Read file content
+  read_file(file_id, &time_step, &n_atoms, &sim_box,
+	    &xx, &yy, &zz, &vx, &vy, &vz);
+  
+  // Do something with the content
+  printf("%f %f %f %f %f %f\n", xx[0], yy[0], zz[0], vx[0], vy[0], vz[0]);
+  printf("%f %f %f %f %f %f\n", xx[n_atoms-1], yy[n_atoms-1], zz[n_atoms-1], 
+	 vx[n_atoms-1], vy[n_atoms-1], vz[n_atoms-1]);
+  
+  // Free memory associated to file
+  free(sim_box);
+  free(xx);
+  free(yy);
+  free(zz);
+  free(vx);
+  free(vy);
+  free(vz);
+  
+}
+
+// ------ Read one file ------
+void read_file(int file_id, int *out_time_step, int *out_n_atoms, 
+	       double **out_sim_box,
+	       double **out_xx, double **out_yy, double **out_zz,
+	       double **out_vx, double **out_vy, double **out_vz){
+
+  // Variables
+  int time_step = 0; 
+  int n_atoms = 0; 
+  double *sim_box = NULL; 
+  double *xx = NULL, *yy = NULL, *zz = NULL;
+  double *vx = NULL, *vy = NULL, *vz = NULL;
   bool time_flag = false;
   bool n_atoms_flag = false;
   bool box_flag = false;
@@ -180,14 +212,16 @@ void read_file(int file_id){
   // Close file
   gzclose(fid);
 
-  // Free memory associated to file
-  free(sim_box);
-  free(xx);
-  free(yy);
-  free(zz);
-  free(vx);
-  free(vy);
-  free(vz);
+  // Output
+  *out_time_step = time_step;
+  *out_n_atoms = n_atoms;
+  *out_sim_box = sim_box;
+  *out_xx = xx;
+  *out_yy = yy;
+  *out_zz = zz;
+  *out_vx = vx;
+  *out_vy = vy;
+  *out_vz = vz;
 
 }
 

@@ -3,7 +3,12 @@
 
 void get_file_names(char *file_pattern);
 
-void read_file(int file_id);
+void compute_isf(int file_id);
+
+void read_file(int file_id, int *out_time_step, int *out_n_atoms,
+               double **out_sim_box,
+               double **out_xx, double **out_yy, double **out_zz,
+               double **out_vx, double **out_vy, double **out_vz);
 
 void get_headers_info(char *line, bool *time_flag, bool *n_atoms_flag,
                       bool *box_flag, bool *config_flag,
