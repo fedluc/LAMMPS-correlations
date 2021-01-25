@@ -123,6 +123,7 @@ void isf(){
   for (int ii=0; ii<G_FILE_NAMES.gl_pathc; ii++){
     
     // Read file content (it is assumed that one file contains one configuration)
+    printf("%s\n",G_FILE_NAMES.gl_pathv[ii]);
     read_file(ii, &time_step, &n_atoms, &sim_box,
 	      &xx, &yy, &zz, &vx, &vy, &vz);
 
@@ -143,10 +144,10 @@ void isf(){
       }
       // Initialize wave-vector grid
       qq[0] = -(nq_2)*dq;
-      qq[nq_2] = -qq[0];
-      for (int jj=1; jj<nq_2; jj++){ 
-	qq[jj] = qq[jj-1] + dq;
-	qq[jj+nq_2] = -qq[jj];
+      qq[nq-1] = -qq[0];
+      for (int jj=1; jj<nq_2; jj++){
+      	qq[jj] = qq[jj-1] + dq;
+      	qq[nq-jj-1] = -qq[jj];
       }
       // Allocate matrix to store density fluctuations
       drho = malloc(sizeof(*drho) * nq);
@@ -172,11 +173,11 @@ void isf(){
 
     // Compute density fluctuations
     for (int jj=0; jj<nq_2; jj++){
-      drho[ii][jj] = 0.0 + I*0.0;
-      drho[ii][jj+nq_2] = 0.0 + I*0.0;
+      drho[jj][ii] = 0.0 + I*0.0;
+      drho[nq-jj-1][ii] = 0.0 + I*0.0;
       for (int kk=0; kk<n_atoms; kk++){
-	drho[ii][jj] += cexp(I * qq[jj] * xx[kk]);
-	drho[ii][jj+nq_2] += cexp(-I * qq[jj] * xx[kk]);
+	drho[jj][ii] += cexp(I * qq[jj] * xx[kk]);
+	drho[nq-jj-1][ii] += cexp(-I * qq[jj] * xx[kk]);
       }
     }
         
@@ -191,9 +192,9 @@ void isf(){
   
   }
 
-  // Compute intermediate scattering function
-  int lag = G_FILE_NAMES.gl_pathc;
-  double complex (*Fkt)[nq_2] = malloc(sizeof(*drho) * lag);
+  // Compute intermediate scattering function   
+  int lag = (int)G_FILE_NAMES.gl_pathc;
+  double complex (*Fkt)[lag] = malloc(sizeof(*Fkt) * nq_2);
   if (Fkt == NULL){
     printf("ERROR: Failed allocation for intermediate scattering function \n");
     exit(EXIT_FAILURE);
@@ -202,12 +203,44 @@ void isf(){
     for (int jj=0; jj<lag; jj++){
       Fkt[ii][jj] = 0.0;
       for (int kk=0; kk<lag-jj; kk++){
-	Fkt[ii][jj] += drho[ii+nq_2][jj]*drho[ii][jj+kk];
-      } 
-      Fkt[ii][jj] /= lag-jj+1;
-      printf("%f %f\n", creal(Fkt[ii][jj]), cimag(Fkt[ii][jj]));
+      	Fkt[ii][jj] += drho[ii][kk]*drho[nq-ii-1][jj+kk];
+      }
+      Fkt[ii][jj] /= (lag-jj)*n_atoms;
     }
-  }    
+  }
+  
+  // Write output
+  FILE *fid;
+  fid = fopen("isf_real.dat", "w");
+  /* fprintf(fid, "#########"); */
+  /* for (int ii=0; ii<lag; ii++) fprintf(fid,"%d        ",ii); */
+  /* fprintf(fid, "\n"); */
+  for (int ii=0; ii<nq_2; ii++){
+    fprintf(fid, "%.8f ", qq[ii+nq_2]);
+    for (int jj=0; jj<lag; jj++){
+      fprintf(fid, "%.8f ", creal(Fkt[ii][jj]));
+    }
+    fprintf(fid, "\n");
+  }
+  fclose(fid);
+
+  fid = fopen("isf_imag.dat", "w");
+  /* fprintf(fid, "##########"); */
+  /* for (int ii=0; ii<lag; ii++) fprintf(fid,"%d        ",ii); */
+  /* fprintf(fid, "\n"); */
+  for (int ii=0; ii<nq_2; ii++){
+    fprintf(fid, "%.8f ", qq[ii+nq_2]);
+    for (int jj=0; jj<lag; jj++){
+      fprintf(fid, "%.8f ", cimag(Fkt[ii][jj]));
+    }
+    fprintf(fid, "\n");
+  }
+  fclose(fid);
+
+
+  
+
+
   
   // Free memory associated to density fluctuations
   free(qq);
@@ -468,20 +501,6 @@ void read_config(gzFile fid, char *line, int n_atoms,
       if (tok_counter == vz_idx) vz[ii] = read_double(tok);
       tok = strtok(NULL, " ");
       tok_counter++;
-    }
-
-    // Check that the positions was read correctly
-    if (xx[ii] == -1 || yy[ii] == -1 || zz[ii] == -1){
-      fprintf(stderr,"ERROR: the atom positions could not be"
-	      " read from the configuration file\n");
-      exit(EXIT_FAILURE);
-    }
-    
-    // Check that the velocities was read correctly
-    if (vx[ii] == -1 || vy[ii] == -1 || vz[ii] == -1){
-      fprintf(stderr,"ERROR: the atom velocities could not be"
-	      " read from the configuration file\n");
-      exit(EXIT_FAILURE);
     }
 
   }
