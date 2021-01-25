@@ -9,28 +9,38 @@
 #include <errno.h>
 #include <glob.h>
 #include <zlib.h>
+#include <math.h>
+#include <complex.h>
 #include "lmp_corr.h"
 
 # define LINE_BUF_SIZE 1024 // maximum line length from input
 
-static glob_t file_names;
+static glob_t G_FILE_NAMES; // List of files to load
+static double G_QMAX; // wave-vector cutoff
 
-// Main
+
+// ------ Main ------
 int main(int argc, char *argv[]) {
 
   // Default values
+  // Input file
   char *file_pattern;
   file_pattern = (char*) malloc(sizeof(char) * 21);
   strcpy(file_pattern, "trajectories*.dat");
+  // Wave-vector cutoff
+  G_QMAX = 15.0;
 
   // Parse command line
   static const char *usage = "Description coming soon...";
   int opt;
-  while ((opt = getopt(argc, argv, "hi:")) != -1) {
+  while ((opt = getopt(argc, argv, "hi:q:")) != -1) {
     switch (opt) {
     case 'i':
       file_pattern = (char*)realloc(file_pattern, sizeof(char) * (strlen(optarg)+1));
       strcpy(file_pattern, optarg);
+      break;
+    case 'q':
+      G_QMAX = read_double(optarg);
       break;
     case 'h':
       printf(usage, argv[0]);
@@ -55,11 +65,9 @@ int main(int argc, char *argv[]) {
   // Get file names
   get_file_names(file_pattern);
 
-  // Extract data from the files
+  // Compute intermediate scattering function
   clock_t start = clock();
-  for (int ii=0; ii<file_names.gl_pathc; ii++){
-    compute_isf(ii);
-  }
+  isf();
   clock_t end = clock();
   printf("Elapsed time: %f seconds\n",
          (double)(end - start) / CLOCKS_PER_SEC);
@@ -67,7 +75,7 @@ int main(int argc, char *argv[]) {
   
   // Free memory
   free(file_pattern);
-  globfree(&file_names);
+  globfree(&G_FILE_NAMES);
 
   return 0;
 
@@ -78,7 +86,7 @@ int main(int argc, char *argv[]) {
 void get_file_names(char *file_pattern){
 
   int glob_check;
-  glob_check = glob(file_pattern, GLOB_MARK, NULL, &file_names);
+  glob_check = glob(file_pattern, GLOB_MARK, NULL, &G_FILE_NAMES);
   if (glob_check == GLOB_NOSPACE){
     fprintf(stderr, "ERROR: Glob, out of memory\n");
     exit(EXIT_FAILURE);
@@ -95,7 +103,7 @@ void get_file_names(char *file_pattern){
 }
 
 // ------ Compute intermediate scattering function ------
-void compute_isf(int file_id){
+void isf(){
 
   // Variables to store the information read from the file
   int time_step = 0; // Timestep
@@ -104,24 +112,110 @@ void compute_isf(int file_id){
   double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
   double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
 
-  // Read file content
-  read_file(file_id, &time_step, &n_atoms, &sim_box,
-	    &xx, &yy, &zz, &vx, &vy, &vz);
+  // Variables to compute the density fluctuations
+  bool init = true;
+  double LL, LL_tmp, dq, *qq = NULL;
+  int nq = 0, nq_2 = 0;
+  double complex (*drho)[G_FILE_NAMES.gl_pathc] = NULL;
   
-  // Do something with the content
-  printf("%f %f %f %f %f %f\n", xx[0], yy[0], zz[0], vx[0], vy[0], vz[0]);
-  printf("%f %f %f %f %f %f\n", xx[n_atoms-1], yy[n_atoms-1], zz[n_atoms-1], 
-	 vx[n_atoms-1], vy[n_atoms-1], vz[n_atoms-1]);
   
-  // Free memory associated to file
-  free(sim_box);
-  free(xx);
-  free(yy);
-  free(zz);
-  free(vx);
-  free(vy);
-  free(vz);
+  // Loop through the configuration files
+  for (int ii=0; ii<G_FILE_NAMES.gl_pathc; ii++){
+    
+    // Read file content (it is assumed that one file contains one configuration)
+    read_file(ii, &time_step, &n_atoms, &sim_box,
+	      &xx, &yy, &zz, &vx, &vy, &vz);
+
+    // Initialize calculations (if necessary)
+    if (init) {
+      // Wave-vector resolution
+      LL = sim_box[0];
+      if (sim_box[1] < LL) LL = sim_box[1];
+      if (sim_box[2] < LL) LL = sim_box[2];
+      dq = 2.0*M_PI/LL;
+      // Allocate wave-vector grid
+      nq = 2*(int)G_QMAX/dq; // Consider also negative values
+      nq_2 = nq/2;
+      qq = (double*)malloc(sizeof(double) * nq);
+      if (qq == NULL){
+	printf("ERROR: Failed allocation for wave-vector grid\n");
+	exit(EXIT_FAILURE);
+      }
+      // Initialize wave-vector grid
+      qq[0] = -(nq_2)*dq;
+      qq[nq_2] = -qq[0];
+      for (int jj=1; jj<nq_2; jj++){ 
+	qq[jj] = qq[jj-1] + dq;
+	qq[jj+nq_2] = -qq[jj];
+      }
+      // Allocate matrix to store density fluctuations
+      drho = malloc(sizeof(*drho) * nq);
+      if (drho == NULL){
+	printf("ERROR: Failed allocation for density fluctuations\n");
+	exit(EXIT_FAILURE);
+      }      
+      // De-activate initialization
+      init = false;
+    }
+    else {
+      // check that was read is consistent with the previous files
+      LL_tmp = sim_box[0];
+      if (sim_box[1] < LL_tmp) LL_tmp = sim_box[1];
+      if (sim_box[2] < LL_tmp) LL_tmp = sim_box[2];
+      if ( abs(LL_tmp-LL) > 1e-10 ) {
+	printf("ERROR: The simulation box changed for file %s\n", 
+	       (G_FILE_NAMES.gl_pathv[ii]));
+	exit(EXIT_FAILURE);
+      }    
+    }
+ 
+
+    // Compute density fluctuations
+    for (int jj=0; jj<nq_2; jj++){
+      drho[ii][jj] = 0.0 + I*0.0;
+      drho[ii][jj+nq_2] = 0.0 + I*0.0;
+      for (int kk=0; kk<n_atoms; kk++){
+	drho[ii][jj] += cexp(I * qq[jj] * xx[kk]);
+	drho[ii][jj+nq_2] += cexp(-I * qq[jj] * xx[kk]);
+      }
+    }
+        
+    // Free memory associated to file
+    free(sim_box);
+    free(xx);
+    free(yy);
+    free(zz);
+    free(vx);
+    free(vy);
+    free(vz);
   
+  }
+
+  // Compute intermediate scattering function
+  int lag = G_FILE_NAMES.gl_pathc;
+  double complex (*Fkt)[nq_2] = malloc(sizeof(*drho) * lag);
+  if (Fkt == NULL){
+    printf("ERROR: Failed allocation for intermediate scattering function \n");
+    exit(EXIT_FAILURE);
+  }
+  for (int ii=0; ii<nq_2; ii++){
+    for (int jj=0; jj<lag; jj++){
+      Fkt[ii][jj] = 0.0;
+      for (int kk=0; kk<lag-jj; kk++){
+	Fkt[ii][jj] += drho[ii+nq_2][jj]*drho[ii][jj+kk];
+      } 
+      Fkt[ii][jj] /= lag-jj+1;
+      printf("%f %f\n", creal(Fkt[ii][jj]), cimag(Fkt[ii][jj]));
+    }
+  }    
+  
+  // Free memory associated to density fluctuations
+  free(qq);
+  free(drho);
+
+  // Free memory associated to intermediate scattering function
+  free(Fkt);
+
 }
 
 // ------ Read one file ------
@@ -129,10 +223,10 @@ void read_file(int file_id, int *out_time_step, int *out_n_atoms,
 	       double **out_sim_box,
 	       double **out_xx, double **out_yy, double **out_zz,
 	       double **out_vx, double **out_vy, double **out_vz){
-
+  
   // Variables
-  int time_step = 0; 
-  int n_atoms = 0; 
+  int time_step = -1; 
+  int n_atoms = -1; 
   double *sim_box = NULL; 
   double *xx = NULL, *yy = NULL, *zz = NULL;
   double *vx = NULL, *vy = NULL, *vz = NULL;
@@ -146,7 +240,7 @@ void read_file(int file_id, int *out_time_step, int *out_n_atoms,
   char line[LINE_BUF_SIZE];
 
   // Open file
-  fid = gzopen(file_names.gl_pathv[file_id], "r");
+  fid = gzopen(G_FILE_NAMES.gl_pathv[file_id], "r");
   read_line(fid, line);
 
   // Read line by line until enf of file
@@ -211,6 +305,17 @@ void read_file(int file_id, int *out_time_step, int *out_n_atoms,
 
   // Close file
   gzclose(fid);
+
+  // Check that all the necessary information was read from the file
+  if ( time_step == -1 || n_atoms == -1 || sim_box == NULL ||
+       xx == NULL || yy == NULL || zz == NULL || 
+       vx == NULL || vy == NULL || vz == NULL ||
+       x_idx == -1 || y_idx == -1 || z_idx == -1 ||
+       vx_idx == -1 || vy_idx == -1 || vz_idx == -1){
+    fprintf(stderr, "ERROR: It was not possible to read all necessary information"
+	    " from the configuration file\n");
+    exit(EXIT_FAILURE);
+  }
 
   // Output
   *out_time_step = time_step;

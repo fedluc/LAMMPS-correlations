@@ -3,7 +3,7 @@
 
 void get_file_names(char *file_pattern);
 
-void compute_isf(int file_id);
+void isf();
 
 void read_file(int file_id, int *out_time_step, int *out_n_atoms,
                double **out_sim_box,

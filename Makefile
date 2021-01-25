@@ -17,7 +17,7 @@ all: $(EXECUTABLE)
 
 # Link
 $(EXECUTABLE): $(OBJS)
-	 $(CC) $(LIB) $^ -o $@ -lz
+	 $(CC) $(LIB) $^ -o $@ -lm -lz
 
 clean:
 	 rm *.o $(EXECUTABLE)
