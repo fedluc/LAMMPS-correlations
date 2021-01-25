@@ -9,7 +9,7 @@
 #include <errno.h>
 #include <glob.h>
 #include <zlib.h>
-#include "isf.h"
+#include "lmp_corr.h"
 
 # define LINE_BUF_SIZE 1024 // maximum line length from input
 

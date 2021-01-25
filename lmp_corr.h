@@ -1,5 +1,5 @@
-#ifndef ISF_H
-#define ISF_H
+#ifndef LMP_CORR_H
+#define LMP_CORR_H
 
 void get_file_names(char *file_pattern);
 

@@ -7,7 +7,7 @@ SRC = $(wildcard *.c)
 OBJS = $(patsubst %.c, %.o, $(SRC))
 
 # Name of the executable
-EXECUTABLE = isf
+EXECUTABLE = lmp_corr
 
 # Compile
 all: $(EXECUTABLE)
