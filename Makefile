@@ -20,4 +20,4 @@ $(EXECUTABLE): $(OBJS)
 	 $(CC) $(LIB) $^ -o $@ -lz
 
 clean:
-	 rm *.o isf
+	 rm *.o $(EXECUTABLE)
