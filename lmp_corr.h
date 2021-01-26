@@ -5,6 +5,8 @@ void get_file_names(char *file_pattern);
 
 void isf();
 
+void lvcf();
+
 void read_file(int file_id, int *out_time_step, int *out_n_atoms,
                double **out_sim_box,
                double **out_xx, double **out_yy, double **out_zz,

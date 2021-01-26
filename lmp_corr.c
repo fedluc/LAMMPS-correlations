@@ -29,11 +29,15 @@ int main(int argc, char *argv[]) {
   strcpy(file_pattern, "trajectories*.dat");
   // Wave-vector cutoff
   G_QMAX = 10.0;
+  // Flag for intermediate scattering function calculation
+  int isf_flag = 0;
+  // Flag for longitudinal velocity correlation function
+  int lvcf_flag = 0;
 
   // Parse command line
   static const char *usage = "Description coming soon...";
   int opt;
-  while ((opt = getopt(argc, argv, "hi:q:")) != -1) {
+  while ((opt = getopt(argc, argv, "hi:q:dv")) != -1) {
     switch (opt) {
     case 'i':
       file_pattern = (char*)realloc(file_pattern, sizeof(char) * (strlen(optarg)+1));
@@ -41,6 +45,12 @@ int main(int argc, char *argv[]) {
       break;
     case 'q':
       G_QMAX = read_double(optarg);
+      break;
+    case 'd':
+      isf_flag = 1;
+      break;
+    case 'v':
+      lvcf_flag = 1;
       break;
     case 'h':
       printf(usage, argv[0]);
@@ -66,16 +76,19 @@ int main(int argc, char *argv[]) {
   get_file_names(file_pattern);
 
   // Compute intermediate scattering function
-  clock_t start = clock();
-  isf();
-  clock_t end = clock();
-  printf("Elapsed time: %f seconds\n",
-         (double)(end - start) / CLOCKS_PER_SEC);
+  if (isf_flag == 1) isf();
+  if (lvcf_flag == 1) lvcf();
+  /* // Compute intermediate scattering function */
+  /* clock_t start = clock(); */
+  /* isf(); */
+  /* clock_t end = clock(); */
+  /* printf("Elapsed time: %f seconds\n", */
+  /*        (double)(end - start) / CLOCKS_PER_SEC); */
 
   
-  // Free memory
-  free(file_pattern);
-  globfree(&G_FILE_NAMES);
+  /* // Free memory */
+  /* free(file_pattern); */
+  /* globfree(&G_FILE_NAMES); */
 
   return 0;
 
@@ -117,8 +130,7 @@ void isf(){
   double LL, LL_tmp, dq, *qq = NULL;
   int nq = 0;
   double complex (*drhok)[G_FILE_NAMES.gl_pathc] = NULL;
-  double complex (*drhomk)[G_FILE_NAMES.gl_pathc] = NULL;
-  
+  double complex (*drhomk)[G_FILE_NAMES.gl_pathc] = NULL;  
   
   // Loop through the configuration files
   for (int ii=0; ii<G_FILE_NAMES.gl_pathc; ii++){
@@ -247,6 +259,154 @@ void isf(){
 
   // Free memory associated to intermediate scattering function
   free(Fkt);
+
+}
+
+
+// ------ Compute longitudinal velocity correlation function ------
+void lvcf(){
+
+  // Variables to store the information read from the file
+  int time_step = 0; // Timestep
+  int n_atoms = 0; // Number of atoms
+  double *sim_box = NULL; // Simulation box
+  double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
+  double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
+
+  // Variables to compute the velocity fluctuations
+  bool init = true;
+  double LL, LL_tmp, dq, *qq = NULL;
+  int nq = 0;
+  double complex (*dvk)[G_FILE_NAMES.gl_pathc] = NULL;
+  double complex (*dvmk)[G_FILE_NAMES.gl_pathc] = NULL;  
+  
+  // Loop through the configuration files
+  for (int ii=0; ii<G_FILE_NAMES.gl_pathc; ii++){
+    
+    // Read file content (it is assumed that one file contains one configuration)
+    printf("%s\n",G_FILE_NAMES.gl_pathv[ii]);
+    fflush(stdout); 
+    read_file(ii, &time_step, &n_atoms, &sim_box,
+	      &xx, &yy, &zz, &vx, &vy, &vz);
+
+    // Initialize calculations (if necessary)
+    if (init) {
+      // Wave-vector resolution
+      LL = sim_box[0];
+      if (sim_box[1] < LL) LL = sim_box[1];
+      if (sim_box[2] < LL) LL = sim_box[2];
+      dq = 2.0*M_PI/LL;
+      // Allocate wave-vector grid
+      nq = (int)G_QMAX/dq;
+      qq = (double*)malloc(sizeof(double) * nq);
+      if (qq == NULL){
+	printf("ERROR: Failed allocation for wave-vector grid\n");
+	exit(EXIT_FAILURE);
+      }
+      // Initialize wave-vector grid
+      for (int jj=0; jj<nq; jj++){
+      	qq[jj] = (jj+1)*dq;
+      }
+      // Allocate matrix to store velocity fluctuations
+      dvk = malloc(sizeof(*dvk) * nq);
+      dvmk = malloc(sizeof(*dvmk) * nq);
+      if (dvk == NULL || dvmk == NULL){
+	printf("ERROR: Failed allocation for density fluctuations\n");
+	exit(EXIT_FAILURE);
+      }      
+      // De-activate initialization
+      init = false;
+    }
+    else {
+      // check that was read is consistent with the previous files
+      LL_tmp = sim_box[0];
+      if (sim_box[1] < LL_tmp) LL_tmp = sim_box[1];
+      if (sim_box[2] < LL_tmp) LL_tmp = sim_box[2];
+      if ( abs(LL_tmp-LL) > 1e-10 ) {
+	printf("ERROR: The simulation box changed for file %s\n", 
+	       (G_FILE_NAMES.gl_pathv[ii]));
+	exit(EXIT_FAILURE);
+      }    
+    }
+ 
+
+    // Compute velocity fluctuations
+    for (int jj=0; jj<nq; jj++){
+      dvk[jj][ii] = 0.0 + I*0.0;
+      dvmk[jj][ii] = 0.0 + I*0.0;
+      for (int kk=0; kk<n_atoms; kk++){
+	dvk[jj][ii] += vx[kk]*cexp(I * qq[jj] * xx[kk]);
+	dvmk[jj][ii] += vx[kk]*cexp(-I * qq[jj] * xx[kk]);
+      }
+    }
+        
+    // Free memory associated to file
+    free(sim_box);
+    free(xx);
+    free(yy);
+    free(zz);
+    free(vx);
+    free(vy);
+    free(vz);
+  
+  }
+
+  // Compute longitudinal velocity correlation function   
+  int lag = (int)G_FILE_NAMES.gl_pathc;
+  double complex (*Ckt)[lag] = malloc(sizeof(*Ckt) * nq);
+  if (Ckt == NULL){
+    printf("ERROR: Failed allocation for intermediate scattering function \n");
+    exit(EXIT_FAILURE);
+  }
+  int norm_fact;
+  for (int jj=0; jj<nq; jj++){
+    for (int kk=0; kk<lag; kk++){
+      Ckt[jj][kk] = 0.0;
+      norm_fact = 0;
+      for (int ll=0; ll<lag-kk; ll++){
+      	Ckt[jj][kk] += dvmk[jj][ll]*dvk[jj][kk+ll];
+	norm_fact++;
+      }
+      Ckt[jj][kk] /= norm_fact*n_atoms;
+    }
+  }
+  
+  // Write output
+  FILE *fid;
+  fid = fopen("lvcf_real.dat", "w");
+  /* fprintf(fid, "#########"); */
+  /* for (int ii=0; ii<lag; ii++) fprintf(fid,"%d        ",ii); */
+  /* fprintf(fid, "\n"); */
+  for (int jj=0; jj<nq; jj++){
+    fprintf(fid, "%.8f ", qq[jj]);
+    for (int kk=0; kk<lag; kk++){
+      fprintf(fid, "%.8f ", creal(Ckt[jj][kk]));
+    }
+    fprintf(fid, "\n");
+  }
+  fclose(fid);
+
+  fid = fopen("lvcf_imag.dat", "w");
+  /* fprintf(fid, "#########"); */
+  /* for (int ii=0; ii<lag; ii++) fprintf(fid,"%d        ",ii); */
+  /* fprintf(fid, "\n"); */
+  for (int jj=0; jj<nq; jj++){
+    fprintf(fid, "%.8f ", qq[jj]);
+    for (int kk=0; kk<lag; kk++){
+      fprintf(fid, "%.8f ", cimag(Ckt[jj][kk]));
+    }
+    fprintf(fid, "\n");
+  }
+  fclose(fid);  
+
+  
+  // Free memory associated to density fluctuations
+  free(qq);
+  free(dvk);
+  free(dvmk);
+
+  // Free memory associated to intermediate scattering function
+  free(Ckt);
 
 }
 
