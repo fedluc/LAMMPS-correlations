@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
   file_pattern = (char*) malloc(sizeof(char) * 21);
   strcpy(file_pattern, "trajectories*.dat");
   // Wave-vector cutoff
-  G_QMAX = 15.0;
+  G_QMAX = 10.0;
 
   // Parse command line
   static const char *usage = "Description coming soon...";
@@ -115,8 +115,9 @@ void isf(){
   // Variables to compute the density fluctuations
   bool init = true;
   double LL, LL_tmp, dq, *qq = NULL;
-  int nq = 0, nq_2 = 0;
-  double complex (*drho)[G_FILE_NAMES.gl_pathc] = NULL;
+  int nq = 0;
+  double complex (*drhok)[G_FILE_NAMES.gl_pathc] = NULL;
+  double complex (*drhomk)[G_FILE_NAMES.gl_pathc] = NULL;
   
   
   // Loop through the configuration files
@@ -124,6 +125,7 @@ void isf(){
     
     // Read file content (it is assumed that one file contains one configuration)
     printf("%s\n",G_FILE_NAMES.gl_pathv[ii]);
+    fflush(stdout); 
     read_file(ii, &time_step, &n_atoms, &sim_box,
 	      &xx, &yy, &zz, &vx, &vy, &vz);
 
@@ -135,23 +137,20 @@ void isf(){
       if (sim_box[2] < LL) LL = sim_box[2];
       dq = 2.0*M_PI/LL;
       // Allocate wave-vector grid
-      nq = 2*(int)G_QMAX/dq; // Consider also negative values
-      nq_2 = nq/2;
+      nq = (int)G_QMAX/dq;
       qq = (double*)malloc(sizeof(double) * nq);
       if (qq == NULL){
 	printf("ERROR: Failed allocation for wave-vector grid\n");
 	exit(EXIT_FAILURE);
       }
       // Initialize wave-vector grid
-      qq[0] = -(nq_2)*dq;
-      qq[nq-1] = -qq[0];
-      for (int jj=1; jj<nq_2; jj++){
-      	qq[jj] = qq[jj-1] + dq;
-      	qq[nq-jj-1] = -qq[jj];
+      for (int jj=0; jj<nq; jj++){
+      	qq[jj] = (jj+1)*dq;
       }
       // Allocate matrix to store density fluctuations
-      drho = malloc(sizeof(*drho) * nq);
-      if (drho == NULL){
+      drhok = malloc(sizeof(*drhok) * nq);
+      drhomk = malloc(sizeof(*drhomk) * nq);
+      if (drhok == NULL || drhomk == NULL){
 	printf("ERROR: Failed allocation for density fluctuations\n");
 	exit(EXIT_FAILURE);
       }      
@@ -172,12 +171,12 @@ void isf(){
  
 
     // Compute density fluctuations
-    for (int jj=0; jj<nq_2; jj++){
-      drho[jj][ii] = 0.0 + I*0.0;
-      drho[nq-jj-1][ii] = 0.0 + I*0.0;
+    for (int jj=0; jj<nq; jj++){
+      drhok[jj][ii] = 0.0 + I*0.0;
+      drhomk[jj][ii] = 0.0 + I*0.0;
       for (int kk=0; kk<n_atoms; kk++){
-	drho[jj][ii] += cexp(I * qq[jj] * xx[kk]);
-	drho[nq-jj-1][ii] += cexp(-I * qq[jj] * xx[kk]);
+	drhok[jj][ii] += cexp(I * qq[jj] * xx[kk]);
+	drhomk[jj][ii] += cexp(-I * qq[jj] * xx[kk]);
       }
     }
         
@@ -194,18 +193,21 @@ void isf(){
 
   // Compute intermediate scattering function   
   int lag = (int)G_FILE_NAMES.gl_pathc;
-  double complex (*Fkt)[lag] = malloc(sizeof(*Fkt) * nq_2);
+  double complex (*Fkt)[lag] = malloc(sizeof(*Fkt) * nq);
   if (Fkt == NULL){
     printf("ERROR: Failed allocation for intermediate scattering function \n");
     exit(EXIT_FAILURE);
   }
-  for (int ii=0; ii<nq_2; ii++){
-    for (int jj=0; jj<lag; jj++){
-      Fkt[ii][jj] = 0.0;
-      for (int kk=0; kk<lag-jj; kk++){
-      	Fkt[ii][jj] += drho[ii][kk]*drho[nq-ii-1][jj+kk];
+  int norm_fact;
+  for (int jj=0; jj<nq; jj++){
+    for (int kk=0; kk<lag; kk++){
+      Fkt[jj][kk] = 0.0;
+      norm_fact = 0;
+      for (int ll=0; ll<lag-kk; ll++){
+      	Fkt[jj][kk] += drhomk[jj][ll]*drhok[jj][kk+ll];
+	norm_fact++;
       }
-      Fkt[ii][jj] /= (lag-jj)*n_atoms;
+      Fkt[jj][kk] /= norm_fact*n_atoms;
     }
   }
   
@@ -215,36 +217,33 @@ void isf(){
   /* fprintf(fid, "#########"); */
   /* for (int ii=0; ii<lag; ii++) fprintf(fid,"%d        ",ii); */
   /* fprintf(fid, "\n"); */
-  for (int ii=0; ii<nq_2; ii++){
-    fprintf(fid, "%.8f ", qq[ii+nq_2]);
-    for (int jj=0; jj<lag; jj++){
-      fprintf(fid, "%.8f ", creal(Fkt[ii][jj]));
+  for (int jj=0; jj<nq; jj++){
+    fprintf(fid, "%.8f ", qq[jj]);
+    for (int kk=0; kk<lag; kk++){
+      fprintf(fid, "%.8f ", creal(Fkt[jj][kk]));
     }
     fprintf(fid, "\n");
   }
   fclose(fid);
 
   fid = fopen("isf_imag.dat", "w");
-  /* fprintf(fid, "##########"); */
+  /* fprintf(fid, "#########"); */
   /* for (int ii=0; ii<lag; ii++) fprintf(fid,"%d        ",ii); */
   /* fprintf(fid, "\n"); */
-  for (int ii=0; ii<nq_2; ii++){
-    fprintf(fid, "%.8f ", qq[ii+nq_2]);
-    for (int jj=0; jj<lag; jj++){
-      fprintf(fid, "%.8f ", cimag(Fkt[ii][jj]));
+  for (int jj=0; jj<nq; jj++){
+    fprintf(fid, "%.8f ", qq[jj]);
+    for (int kk=0; kk<lag; kk++){
+      fprintf(fid, "%.8f ", cimag(Fkt[jj][kk]));
     }
     fprintf(fid, "\n");
   }
-  fclose(fid);
-
-
-  
-
+  fclose(fid);  
 
   
   // Free memory associated to density fluctuations
   free(qq);
-  free(drho);
+  free(drhok);
+  free(drhomk);
 
   // Free memory associated to intermediate scattering function
   free(Fkt);
