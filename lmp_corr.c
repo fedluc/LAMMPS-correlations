@@ -78,7 +78,7 @@ void isf(){
 
   // Variables to compute the intermediate scattering function
   double complex *fkt = NULL;
-  int norm_fact;
+  double norm_fact;
 
   // Initialize
   isf_init(&n_atoms, &LL, &dq, &nq,
@@ -144,10 +144,9 @@ void isf(){
       norm_fact = 0.0;
       arr_idx = idx2(jj,kk,nq);
       for (int ll=0; ll<n_files-kk; ll++){
-  	norm_fact++;
+  	norm_fact+= 1.0;
       }
-      //printf("%f %f\n", creal(fkt[arr_idx]), (double)norm_fact*nq_dir*n_atoms);
-      fkt[arr_idx] /= (double)norm_fact;
+      fkt[arr_idx] /= norm_fact;
     }
   }
 
@@ -188,9 +187,9 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   //Wave-vector grid
   dq = 2.0*M_PI/LL;
   nq = (int)G_IN.q_max/dq;
-  ntheta = (int)(2.0*M_PI/G_IN.dtheta);
+  ntheta = (int)(M_PI/G_IN.dtheta) + 1;
   nphi = (int)(2.0*M_PI/G_IN.dphi);
-  nq_dir = ntheta*nphi;
+  nq_dir = nphi*(ntheta-2) + 2;
 
   // Allocate array to store the simulation box information
   sim_box = malloc(sizeof(double) * 3);
@@ -260,16 +259,23 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   // Initialize the wave-vector grid
   for (int ii=0; ii<nq; ii++){
     qtmp = (ii+1)*dq;
-    for (int jj=0; jj<ntheta; jj++){
-      qsint = qtmp * sin(G_IN.dtheta*jj);
-      qcost = qtmp * cos(G_IN.dtheta*jj);
+    for (int jj=0; jj<ntheta-2; jj++){
+      qsint = qtmp * sin(G_IN.dtheta*(jj+1));
+      qcost = qtmp * cos(G_IN.dtheta*(jj+1));
       for (int kk=0; kk<nphi; kk++){
-      	idx_dir = jj*nphi + kk;
+      	idx_dir = jj*nphi + kk + 1;
       	qq[idx3(ii, idx_dir, 0, nq, nq_dir)] = qsint * cos(G_IN.dphi*kk);
       	qq[idx3(ii, idx_dir, 1, nq, nq_dir)] = qsint * sin(G_IN.dphi*kk);
       	qq[idx3(ii, idx_dir, 2, nq, nq_dir)] = qcost;
       }
     }
+    // Add separately the entries for theta = 0 and theta = pi
+    qq[idx3(ii, 0, 0, nq, nq_dir)] = 0;
+    qq[idx3(ii, 0, 1, nq, nq_dir)] = 0;
+    qq[idx3(ii, 0, 2, nq, nq_dir)] = qtmp;
+    qq[idx3(ii, nq_dir-1, 0, nq, nq_dir)] = 0;
+    qq[idx3(ii, nq_dir-1, 1, nq, nq_dir)] = 0;
+    qq[idx3(ii, nq_dir-1, 2, nq, nq_dir)] = -qtmp;
   }
 
   // Initialize intermediate scattering function
