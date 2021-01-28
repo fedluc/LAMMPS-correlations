@@ -2,7 +2,8 @@
 #include <stdbool.h>
 #include <string.h>
 #include <argp.h>
-#include <time.h>
+#include <math.h>
+#include <omp.h>
 #include "lmp_corr.h"
 
 // ----------------------------------------
@@ -26,17 +27,27 @@ static struct argp_option options[] = {
    "Use this flag to compute the intermediate scattering function" },
   {"lvcf",   'v', 0, 0,
    "Use this flag to compute the longitudinal velocity correlation function" },
+  {"num_threads",   'n', "NUM_THREADS", 0,
+   "Number of threads to use for the parallel computations with openMP"},
+  {"theta",   't', "DTHETA", 0,
+   "Angular resolution for the wave-vector directions (polar component)"},
+  {"phi",   'p', "DPHI", 0,
+   "Angular resolution for the wave-vector directions (azimutal component)"},
   { 0 }
 };
 
 // Structure to communicate between main and parser
 struct arguments
 {
-  char *config_file;
-  double q_max;
+
   bool isf;
   bool lvcf;
-
+  char *config_file;
+  double q_max;
+  double dtheta;
+  double dphi;
+  int num_threads;
+  
 };
 
 
@@ -53,11 +64,20 @@ parse_opt (int key, char *arg, struct argp_state *state)
     case 'c':
       arguments->config_file = arg;
       break;
+    case 'd':
+      arguments->isf = true;
+      break;
+    case 'n':
+      arguments->num_threads = atoi(arg);
+      break;
+    case 'p':
+      arguments->dphi = atof(arg);
+      break;
     case 'q':
       arguments->q_max = atof(arg);
       break;
-    case 'd':
-      arguments->isf = true;
+    case 't':
+      arguments->dtheta = atof(arg);
       break;
     case 'v':
       arguments->lvcf = true;
@@ -87,31 +107,32 @@ int main (int argc, char **argv){
   struct arguments arguments;
 
   // Default values for optional arguments
-  arguments.config_file  = "trajectories*.dat.gz";
-  arguments.q_max = 10.0;
   arguments.isf = false;
   arguments.lvcf = false;
+  arguments.config_file  = "trajectories*.dat.gz";
+  arguments.q_max = 10.0;
+  arguments.dtheta = M_PI/4.0;
+  arguments.dphi = M_PI/4.0;
+  arguments.num_threads = 16;
 
   // Parse command line
   argp_parse (&argp, argc, argv, 0, 0, &arguments);
 
   // Prepare input for LAMMPS analyzer
   input in;
-  in.config_file = arguments.config_file;
-  in.q_max = arguments.q_max;
   in.isf = arguments.isf;
   in.lvcf = arguments.lvcf;
-
-  // Start timing
-  clock_t t_start = clock();
+  in.config_file = arguments.config_file;
+  in.q_max = arguments.q_max;
+  in.dtheta = arguments.dtheta;
+  in.dphi = arguments.dphi;
+  in.num_threads = arguments.num_threads;
 
   // Analyze LAMMPS output
+  double start = omp_get_wtime();
   analyze_lmp(in);
-
-  // Stop timing
-  clock_t t_end = clock();
-  printf("Analysis complete. Elapsed time: %f seconds\n",
-         (double)(t_end - t_start) / CLOCKS_PER_SEC);
+  double end = omp_get_wtime();
+  printf("Analysis completed. Elapsed time: %f seconds\n", end - start);
 
 
   return 0;

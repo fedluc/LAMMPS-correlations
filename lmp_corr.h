@@ -5,10 +5,14 @@
 #include <complex.h>
 
 typedef struct {
-  char *config_file;
-  double q_max;
+
   bool isf;
   bool lvcf;
+  char *config_file;
+  double q_max;
+  double dtheta;
+  double dphi;
+  int num_threads;
 
 } input;
 
@@ -20,12 +24,13 @@ void isf();
 
 
 void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
-	      double **out_sim_box, double **out_xx, double **out_yy, double **out_zz,
+              int *out_nq_dir, double **out_sim_box,
+              double **out_xx, double **out_yy, double **out_zz,
               double **out_vx, double **out_vy, double **out_vz,
-              double **out_qq, double complex **out_drhok, double complex **out_drhomk,
-	      double complex **out_fkt);
+              double **out_qq, double complex **out_drhok,
+              double complex **out_drhomk, double complex **out_fkt);
 
-void isf_output(double complex *fkt, double *qq, int nq, int n_files);
+void isf_output(double complex *fkt, double dq, int nq, int n_files);
 
 void isf_free(double *out_sim_box, double *xx, double *yy, double *zz,
 	      double *vx, double *vy, double *vz,

@@ -13,11 +13,11 @@ EXECUTABLE = lmp_corr
 all: $(EXECUTABLE)
 
 %.o: %.c
-	 $(CC) $(CFLAGS) $(INCLUDE) -c $<
+	 $(CC) $(CFLAGS) -fopenmp -c $<
 
 # Link
 $(EXECUTABLE): $(OBJS)
-	 $(CC) $(LIB) $^ -o $@ -lm -lz
+	 $(CC) -fopenmp $^ -o $@ -lm -lz
 
 clean:
 	 rm *.o $(EXECUTABLE)

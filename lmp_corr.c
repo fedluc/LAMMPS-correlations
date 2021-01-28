@@ -9,13 +9,13 @@
 #include <zlib.h>
 #include <math.h>
 #include <complex.h>
+#include <omp.h>
 #include "lmp_corr.h"
 
 # define LINE_BUF_SIZE 1024 // maximum line length from input
 
 static glob_t G_FILE_NAMES; // List of files to load
-static double G_QMAX; // wave-vector cutoff
-
+static input G_IN;
 
 // ------ Caller for the other functions in the file  ------
 void analyze_lmp(input in) {
@@ -23,11 +23,10 @@ void analyze_lmp(input in) {
   // Set global variable with file names
   get_file_names(in.config_file);
 
-  // Set global variable with wave-vector cutoff
-  G_QMAX = in.q_max;
+  // Set global variable with input from user
+  G_IN = in;
 
   // Compute intermediate scattering function
-  
   if (in.isf) isf();
   
   // Free memory
@@ -68,7 +67,7 @@ void isf(){
   double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
 
   // Variables to compute the density fluctuations
-  int nq; // Number of points in the wave-vector grid
+  int nq, nq_dir; // Number of points in the wave-vector grid
   double dq; // Resolution of the wave-vector grid
   double LL; // Smallest simulation box size 
   double *qq = NULL; // Wave-vector grid
@@ -82,10 +81,11 @@ void isf(){
   int norm_fact;
 
   // Initialize
-  isf_init(&n_atoms, &LL, &dq, &nq, 
-	   &sim_box, &xx, &yy, &zz,
-	   &vx, &vy, &vz, &qq, 
-	   &drhok, &drhomk, &fkt); 
+  isf_init(&n_atoms, &LL, &dq, &nq,
+  	   &nq_dir, &sim_box,
+  	   &xx, &yy, &zz,
+  	   &vx, &vy, &vz, &qq,
+  	   &drhok, &drhomk, &fkt);
 
   
   // Loop through the configuration files
@@ -97,60 +97,82 @@ void isf(){
     read_file(ii, &time_step, &n_atoms_tmp, sim_box,
   	      xx, yy, zz, vx, vy, vz);
     
-
     // check input consistency
     check_consistency(n_atoms, n_atoms_tmp, LL, sim_box);
- 
 
-    // Compute density fluctuations
+
+    //Loop through the wave-vector magnitudes
+    omp_set_num_threads(G_IN.num_threads);
+    #pragma omp parallel for
     for (int jj=0; jj<nq; jj++){
-      arr_idx = idx2(jj,ii,nq);
-      drhok[arr_idx] = 0.0 + I*0.0;
-      drhomk[arr_idx] = 0.0 + I*0.0;
-      for (int kk=0; kk<n_atoms; kk++){
-      	qk = qq[jj] * xx[kk];
-      	cosqk = cos(qk);
-      	sinqk = sin(qk);
-      	drhok[arr_idx] += cosqk + I * sinqk;
-      	drhomk[arr_idx] += cosqk - I * sinqk;;
+      // Loop through the wave-vector directions
+      for (int kk=0; kk<nq_dir; kk++){
+    	arr_idx = idx3(jj,kk,ii,nq,nq_dir);
+    	drhok[arr_idx] = 0.0 + I*0.0;
+    	drhomk[arr_idx] = 0.0 + I*0.0;
+    	// Loop through the atom positions
+    	for (int mm=0; mm<n_atoms; mm++){
+    	  qk = qq[idx3(jj,kk,0,nq,nq_dir)] * xx[mm] +
+    	       qq[idx3(jj,kk,1,nq,nq_dir)] * yy[mm] +
+    	       qq[idx3(jj,kk,2,nq,nq_dir)] * zz[mm];
+    	  cosqk = cos(qk);
+    	  sinqk = sin(qk);
+    	  drhok[arr_idx] += cosqk + I * sinqk;
+    	  drhomk[arr_idx] += cosqk - I * sinqk;
+    	}
       }
     }
         
   }
 
-  // Compute intermediate scattering function
-  for (int ii=0; ii<nq; ii++){
-    for (int jj=0; jj<n_files; jj++){
-      arr_idx = idx2(ii,jj,nq);
-      fkt[arr_idx] = 0.0;
-      norm_fact = 0;
-      for (int kk=0; kk<n_files-jj; kk++){
-      	fkt[arr_idx] += drhomk[idx2(ii,kk,nq)]*drhok[idx2(ii,jj+kk,nq)];
+  // Compute intermediate scattering function (averaged over directions)
+  for (int ii=0; ii<nq_dir; ii++){
+    for (int jj=0; jj<nq; jj++){
+      for (int kk=0; kk<n_files; kk++){
+  	arr_idx = idx2(jj,kk,nq);
+  	for (int ll=0; ll<n_files-kk; ll++){
+  	  fkt[arr_idx] += drhomk[idx3(jj,ii,ll,nq,nq_dir)]*
+	    drhok[idx3(jj,ii,kk+ll,nq,nq_dir)]/(nq_dir*n_atoms);
+  	}
+      }
+    }
+  }
+
+  // Normalize intermediate scattering function
+  for (int jj=0; jj<nq; jj++){
+    for (int kk=0; kk<n_files; kk++){
+      norm_fact = 0.0;
+      arr_idx = idx2(jj,kk,nq);
+      for (int ll=0; ll<n_files-kk; ll++){
   	norm_fact++;
       }
-      fkt[arr_idx] /= norm_fact*n_atoms;
+      //printf("%f %f\n", creal(fkt[arr_idx]), (double)norm_fact*nq_dir*n_atoms);
+      fkt[arr_idx] /= (double)norm_fact;
     }
   }
 
   // Write output
-  isf_output(fkt, qq, nq, n_files);
+  isf_output(fkt, dq, nq, n_files);
 
   // Free memory
   isf_free(sim_box, xx, yy, zz,
-	   vx, vy, vz,
-	   qq, drhok, drhomk,fkt);
+  	   vx, vy, vz,
+  	   qq, drhok, drhomk,fkt);
+
 }
 
 // ------ Initialize isf calculation ------
 void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
-	      double **out_sim_box, double **out_xx, double **out_yy, double **out_zz,
+	      int *out_nq_dir, double **out_sim_box, 
+	      double **out_xx, double **out_yy, double **out_zz,
 	      double **out_vx, double **out_vy, double **out_vz,
-	      double **out_qq, double complex **out_drhok, double complex **out_drhomk,
-	      double complex **out_fkt){
+	      double **out_qq, double complex **out_drhok, 
+	      double complex **out_drhomk, double complex **out_fkt){
 
   // Variables 
-  int n_atoms = 0, nq = 0, n_files = G_FILE_NAMES.gl_pathc;
-  double LL, dq;
+  int n_atoms = 0, nq = 0, ntheta = 0, nphi = 0, 
+    n_files = G_FILE_NAMES.gl_pathc, nq_dir = 0, idx_dir = 0;
+  double LL, dq, qtmp, qsint, qcost;
   double *sim_box = NULL, *xx = NULL, *yy = NULL, *zz = NULL,
     *vx = NULL, *vy = NULL, *vz = NULL, *qq = NULL;
   double complex *drhok = NULL, *drhomk = NULL, *fkt = NULL;
@@ -163,8 +185,12 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   // simulations) the code will stop and produce an error
   read_file_init(&n_atoms, &LL);
 
-  //Wave-vector resolution
+  //Wave-vector grid
   dq = 2.0*M_PI/LL;
+  nq = (int)G_IN.q_max/dq;
+  ntheta = (int)(2.0*M_PI/G_IN.dtheta);
+  nphi = (int)(2.0*M_PI/G_IN.dphi);
+  nq_dir = ntheta*nphi;
 
   // Allocate array to store the simulation box information
   sim_box = malloc(sizeof(double) * 3);
@@ -206,20 +232,19 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   }
 
   // Allocate array for wave-vector grid
-  nq = (int)G_QMAX/dq;
-  qq = malloc(sizeof(double) * nq);
+  qq = malloc(sizeof(double) * nq * nq_dir * 3);
   if (qq == NULL){
-    printf("ERROR: Failed allocation for wave-vector grid array\n");
+    printf("ERROR: Failed allocation for wave-vector grid array (qq)\n");
     exit(EXIT_FAILURE);
   }
 
   // Allocate arrays to store density fluctuations
-  drhok = malloc(sizeof(double complex) * nq * n_files);
+  drhok = malloc(sizeof(double complex) * nq * nq_dir * n_files);
   if (drhok == NULL){
     printf("ERROR: Failed allocation for density fluctuations array (drhok)\n");
     exit(EXIT_FAILURE);
   }
-  drhomk = malloc(sizeof(double complex) * nq * n_files);
+  drhomk = malloc(sizeof(double complex) * nq * nq_dir * n_files);
   if (drhomk == NULL){
     printf("ERROR: Failed allocation for density fluctuations array (drhomk)\n");
     exit(EXIT_FAILURE);
@@ -233,15 +258,33 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   }
 
   // Initialize the wave-vector grid
-  for (int jj=0; jj<nq; jj++){
-    qq[jj] = (jj+1)*dq;
-  }  
+  for (int ii=0; ii<nq; ii++){
+    qtmp = (ii+1)*dq;
+    for (int jj=0; jj<ntheta; jj++){
+      qsint = qtmp * sin(G_IN.dtheta*jj);
+      qcost = qtmp * cos(G_IN.dtheta*jj);
+      for (int kk=0; kk<nphi; kk++){
+      	idx_dir = jj*nphi + kk;
+      	qq[idx3(ii, idx_dir, 0, nq, nq_dir)] = qsint * cos(G_IN.dphi*kk);
+      	qq[idx3(ii, idx_dir, 1, nq, nq_dir)] = qsint * sin(G_IN.dphi*kk);
+      	qq[idx3(ii, idx_dir, 2, nq, nq_dir)] = qcost;
+      }
+    }
+  }
+
+  // Initialize intermediate scattering function
+  for (int ii=0; ii<nq; ii++){
+      for (int jj=0; jj<n_files; jj++){
+  	fkt[idx2(ii,jj,nq)] = 0.0 + I*0.0;
+      }
+  }
 
   // Output
   *out_n_atoms = n_atoms;
   *out_LL = LL;
   *out_dq = dq;
   *out_nq = nq;
+  *out_nq_dir = nq_dir;
   *out_sim_box = sim_box;
   *out_xx = xx;
   *out_yy = yy;
@@ -257,7 +300,7 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
 }
 
 // ------ Write output for isf calculations ------
-void isf_output(double complex *fkt, double *qq, int nq, int n_files){
+void isf_output(double complex *fkt, double dq, int nq, int n_files){
   
   
   FILE *fid;
@@ -265,7 +308,7 @@ void isf_output(double complex *fkt, double *qq, int nq, int n_files){
   // Real part
   fid = fopen("isf_real.dat", "w");
   for (int ii=0; ii<nq; ii++){
-    fprintf(fid, "%.8f ", qq[ii]);
+    fprintf(fid, "%.8f ", (ii+1)*dq);
     for (int jj=0; jj<n_files; jj++){
       fprintf(fid, "%.8f ", creal(fkt[idx2(ii,jj,nq)]));
     }
@@ -276,7 +319,7 @@ void isf_output(double complex *fkt, double *qq, int nq, int n_files){
   // Imaginary part (should be close to zero)
   fid = fopen("isf_imag.dat", "w");
   for (int ii=0; ii<nq; ii++){
-    fprintf(fid, "%.8f ", qq[ii]);
+    fprintf(fid, "%.8f ", (ii+1)*dq);
     for (int jj=0; jj<n_files; jj++){
       fprintf(fid, "%.8f ", cimag(fkt[idx2(ii,jj,nq)]));
     }
