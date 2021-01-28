@@ -3,8 +3,6 @@
 #include <stdbool.h>
 #include <limits.h>
 #include <float.h>
-#include <time.h>
-#include <getopt.h>
 #include <string.h>
 #include <errno.h>
 #include <glob.h>
@@ -21,7 +19,7 @@ static double G_QMAX; // wave-vector cutoff
 
 // ------ Caller for the other functions in the file  ------
 void analyze_lmp(input in) {
-  
+
   // Set global variable with file names
   get_file_names(in.config_file);
 
@@ -29,15 +27,8 @@ void analyze_lmp(input in) {
   G_QMAX = in.q_max;
 
   // Compute intermediate scattering function
+  
   if (in.isf) isf();
-  if (in.lvcf) lvcf();
-  /* // Compute intermediate scattering function */
-  /* clock_t start = clock(); */
-  /* isf(); */
-  /* clock_t end = clock(); */
-  /* printf("Elapsed time: %f seconds\n", */
-  /*        (double)(end - start) / CLOCKS_PER_SEC); */
-
   
   // Free memory
   globfree(&G_FILE_NAMES);
@@ -69,315 +60,340 @@ void get_file_names(char *file_pattern){
 void isf(){
 
   // Variables to store the information read from the file
+  int n_files = G_FILE_NAMES.gl_pathc;// Number of files
   int time_step = 0; // Timestep
-  int n_atoms = 0; // Number of atoms
+  int n_atoms = 0, n_atoms_tmp; // Number of atoms
   double *sim_box = NULL; // Simulation box
   double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
   double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
 
   // Variables to compute the density fluctuations
-  bool init = true;
-  double LL, LL_tmp, dq, *qq = NULL;
-  int nq = 0;
-  double complex (*drhok)[G_FILE_NAMES.gl_pathc] = NULL;
-  double complex (*drhomk)[G_FILE_NAMES.gl_pathc] = NULL;  
+  int nq; // Number of points in the wave-vector grid
+  double dq; // Resolution of the wave-vector grid
+  double LL; // Smallest simulation box size 
+  double *qq = NULL; // Wave-vector grid
+  double complex *drhok = NULL; // Density fluctuations
+  double complex *drhomk = NULL; // Density fluctuations (complex conjugate)
+  int arr_idx;
+  double qk, cosqk, sinqk;
+
+  // Variables to compute the intermediate scattering function
+  double complex *fkt = NULL;
+  int norm_fact;
+
+  // Initialize
+  isf_init(&n_atoms, &LL, &dq, &nq, 
+	   &sim_box, &xx, &yy, &zz,
+	   &vx, &vy, &vz, &qq, 
+	   &drhok, &drhomk, &fkt); 
+
   
   // Loop through the configuration files
-  for (int ii=0; ii<G_FILE_NAMES.gl_pathc; ii++){
+  for (int ii=0; ii<n_files; ii++){
     
     // Read file content (it is assumed that one file contains one configuration)
     printf("%s\n",G_FILE_NAMES.gl_pathv[ii]);
-    fflush(stdout); 
-    read_file(ii, &time_step, &n_atoms, &sim_box,
-	      &xx, &yy, &zz, &vx, &vy, &vz);
+    fflush(stdout);
+    read_file(ii, &time_step, &n_atoms_tmp, sim_box,
+  	      xx, yy, zz, vx, vy, vz);
+    
 
-    // Initialize calculations (if necessary)
-    if (init) {
-      // Wave-vector resolution
-      LL = sim_box[0];
-      if (sim_box[1] < LL) LL = sim_box[1];
-      if (sim_box[2] < LL) LL = sim_box[2];
-      dq = 2.0*M_PI/LL;
-      // Allocate wave-vector grid
-      nq = (int)G_QMAX/dq;
-      qq = (double*)malloc(sizeof(double) * nq);
-      if (qq == NULL){
-	printf("ERROR: Failed allocation for wave-vector grid\n");
-	exit(EXIT_FAILURE);
-      }
-      // Initialize wave-vector grid
-      for (int jj=0; jj<nq; jj++){
-      	qq[jj] = (jj+1)*dq;
-      }
-      // Allocate matrix to store density fluctuations
-      drhok = malloc(sizeof(*drhok) * nq);
-      drhomk = malloc(sizeof(*drhomk) * nq);
-      if (drhok == NULL || drhomk == NULL){
-	printf("ERROR: Failed allocation for density fluctuations\n");
-	exit(EXIT_FAILURE);
-      }      
-      // De-activate initialization
-      init = false;
-    }
-    else {
-      // check that was read is consistent with the previous files
-      LL_tmp = sim_box[0];
-      if (sim_box[1] < LL_tmp) LL_tmp = sim_box[1];
-      if (sim_box[2] < LL_tmp) LL_tmp = sim_box[2];
-      if ( abs(LL_tmp-LL) > 1e-10 ) {
-	printf("ERROR: The simulation box changed for file %s\n", 
-	       (G_FILE_NAMES.gl_pathv[ii]));
-	exit(EXIT_FAILURE);
-      }    
-    }
+    // check input consistency
+    check_consistency(n_atoms, n_atoms_tmp, LL, sim_box);
  
 
     // Compute density fluctuations
     for (int jj=0; jj<nq; jj++){
-      drhok[jj][ii] = 0.0 + I*0.0;
-      drhomk[jj][ii] = 0.0 + I*0.0;
+      arr_idx = idx2(jj,ii,nq);
+      drhok[arr_idx] = 0.0 + I*0.0;
+      drhomk[arr_idx] = 0.0 + I*0.0;
       for (int kk=0; kk<n_atoms; kk++){
-	drhok[jj][ii] += cexp(I * qq[jj] * xx[kk]);
-	drhomk[jj][ii] += cexp(-I * qq[jj] * xx[kk]);
+      	qk = qq[jj] * xx[kk];
+      	cosqk = cos(qk);
+      	sinqk = sin(qk);
+      	drhok[arr_idx] += cosqk + I * sinqk;
+      	drhomk[arr_idx] += cosqk - I * sinqk;;
       }
     }
         
-    // Free memory associated to file
-    free(sim_box);
-    free(xx);
-    free(yy);
-    free(zz);
-    free(vx);
-    free(vy);
-    free(vz);
-  
   }
 
-  // Compute intermediate scattering function   
-  int lag = (int)G_FILE_NAMES.gl_pathc;
-  double complex (*Fkt)[lag] = malloc(sizeof(*Fkt) * nq);
-  if (Fkt == NULL){
-    printf("ERROR: Failed allocation for intermediate scattering function \n");
-    exit(EXIT_FAILURE);
-  }
-  int norm_fact;
-  for (int jj=0; jj<nq; jj++){
-    for (int kk=0; kk<lag; kk++){
-      Fkt[jj][kk] = 0.0;
+  // Compute intermediate scattering function
+  for (int ii=0; ii<nq; ii++){
+    for (int jj=0; jj<n_files; jj++){
+      arr_idx = idx2(ii,jj,nq);
+      fkt[arr_idx] = 0.0;
       norm_fact = 0;
-      for (int ll=0; ll<lag-kk; ll++){
-      	Fkt[jj][kk] += drhomk[jj][ll]*drhok[jj][kk+ll];
-	norm_fact++;
+      for (int kk=0; kk<n_files-jj; kk++){
+      	fkt[arr_idx] += drhomk[idx2(ii,kk,nq)]*drhok[idx2(ii,jj+kk,nq)];
+  	norm_fact++;
       }
-      Fkt[jj][kk] /= norm_fact*n_atoms;
+      fkt[arr_idx] /= norm_fact*n_atoms;
     }
   }
-  
+
   // Write output
-  FILE *fid;
-  fid = fopen("isf_real.dat", "w");
-  /* fprintf(fid, "#########"); */
-  /* for (int ii=0; ii<lag; ii++) fprintf(fid,"%d        ",ii); */
-  /* fprintf(fid, "\n"); */
+  isf_output(fkt, qq, nq, n_files);
+
+  // Free memory
+  isf_free(sim_box, xx, yy, zz,
+	   vx, vy, vz,
+	   qq, drhok, drhomk,fkt);
+}
+
+// ------ Initialize isf calculation ------
+void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
+	      double **out_sim_box, double **out_xx, double **out_yy, double **out_zz,
+	      double **out_vx, double **out_vy, double **out_vz,
+	      double **out_qq, double complex **out_drhok, double complex **out_drhomk,
+	      double complex **out_fkt){
+
+  // Variables 
+  int n_atoms = 0, nq = 0, n_files = G_FILE_NAMES.gl_pathc;
+  double LL, dq;
+  double *sim_box = NULL, *xx = NULL, *yy = NULL, *zz = NULL,
+    *vx = NULL, *vy = NULL, *vz = NULL, *qq = NULL;
+  double complex *drhok = NULL, *drhomk = NULL, *fkt = NULL;
+  
+  // Read the first configuration file and allocate the necessary arrays
+  // Note: it is assumed that all files refer to the same NVT 
+  // simulation. i.e. the number of atoms and the simulation box, 
+  // remain constant while reading the files. If this is 
+  // not the case (which could happen for NpT or for grand-canonical
+  // simulations) the code will stop and produce an error
+  read_file_init(&n_atoms, &LL);
+
+  //Wave-vector resolution
+  dq = 2.0*M_PI/LL;
+
+  // Allocate array to store the simulation box information
+  sim_box = malloc(sizeof(double) * 3);
+  if (sim_box == NULL){
+    printf("ERROR: Failed allocation for simulation box array\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Allocate arrays to store the configuration
+  xx = malloc(sizeof(double) * n_atoms);
+  if (xx == NULL){
+    printf("ERROR: Failed allocation for configuration array (xx)\n");
+    exit(EXIT_FAILURE);
+  }
+  yy = malloc(sizeof(double) * n_atoms);
+  if (yy == NULL){
+    printf("ERROR: Failed allocation for configuration array (yy)\n");
+    exit(EXIT_FAILURE);
+  }
+  zz = malloc(sizeof(double) * n_atoms);
+  if (zz == NULL){
+    printf("ERROR: Failed allocation for configuration array (zz)\n");
+    exit(EXIT_FAILURE);
+  }
+  vx = malloc(sizeof(double) * n_atoms);
+  if (vx == NULL){
+    printf("ERROR: Failed allocation for configuration array (vx)\n");
+    exit(EXIT_FAILURE);
+  }
+  vy = malloc(sizeof(double) * n_atoms);
+  if (vy == NULL){
+    printf("ERROR: Failed allocation for configuration array (vy)\n");
+    exit(EXIT_FAILURE);
+  }
+  vz = malloc(sizeof(double) * n_atoms);
+  if (vz == NULL){
+    printf("ERROR: Failed allocation for configuration array (vz)\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Allocate array for wave-vector grid
+  nq = (int)G_QMAX/dq;
+  qq = malloc(sizeof(double) * nq);
+  if (qq == NULL){
+    printf("ERROR: Failed allocation for wave-vector grid array\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Allocate arrays to store density fluctuations
+  drhok = malloc(sizeof(double complex) * nq * n_files);
+  if (drhok == NULL){
+    printf("ERROR: Failed allocation for density fluctuations array (drhok)\n");
+    exit(EXIT_FAILURE);
+  }
+  drhomk = malloc(sizeof(double complex) * nq * n_files);
+  if (drhomk == NULL){
+    printf("ERROR: Failed allocation for density fluctuations array (drhomk)\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Allocate array to store the intermediate scattering function
+  fkt = malloc(sizeof(double complex) * nq * n_files);
+  if (fkt == NULL){
+    printf("ERROR: Failed allocation for intermediate scattering function (drhok)\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Initialize the wave-vector grid
   for (int jj=0; jj<nq; jj++){
-    fprintf(fid, "%.8f ", qq[jj]);
-    for (int kk=0; kk<lag; kk++){
-      fprintf(fid, "%.8f ", creal(Fkt[jj][kk]));
+    qq[jj] = (jj+1)*dq;
+  }  
+
+  // Output
+  *out_n_atoms = n_atoms;
+  *out_LL = LL;
+  *out_dq = dq;
+  *out_nq = nq;
+  *out_sim_box = sim_box;
+  *out_xx = xx;
+  *out_yy = yy;
+  *out_zz = zz;
+  *out_vx = vx;
+  *out_vy = vy;
+  *out_vz = vz;
+  *out_qq = qq;
+  *out_drhok = drhok;
+  *out_drhomk = drhomk;
+  *out_fkt = fkt;
+
+}
+
+// ------ Write output for isf calculations ------
+void isf_output(double complex *fkt, double *qq, int nq, int n_files){
+  
+  
+  FILE *fid;
+  
+  // Real part
+  fid = fopen("isf_real.dat", "w");
+  for (int ii=0; ii<nq; ii++){
+    fprintf(fid, "%.8f ", qq[ii]);
+    for (int jj=0; jj<n_files; jj++){
+      fprintf(fid, "%.8f ", creal(fkt[idx2(ii,jj,nq)]));
     }
     fprintf(fid, "\n");
   }
   fclose(fid);
 
+  // Imaginary part (should be close to zero)
   fid = fopen("isf_imag.dat", "w");
-  /* fprintf(fid, "#########"); */
-  /* for (int ii=0; ii<lag; ii++) fprintf(fid,"%d        ",ii); */
-  /* fprintf(fid, "\n"); */
-  for (int jj=0; jj<nq; jj++){
-    fprintf(fid, "%.8f ", qq[jj]);
-    for (int kk=0; kk<lag; kk++){
-      fprintf(fid, "%.8f ", cimag(Fkt[jj][kk]));
+  for (int ii=0; ii<nq; ii++){
+    fprintf(fid, "%.8f ", qq[ii]);
+    for (int jj=0; jj<n_files; jj++){
+      fprintf(fid, "%.8f ", cimag(fkt[idx2(ii,jj,nq)]));
     }
     fprintf(fid, "\n");
   }
-  fclose(fid);  
-
+  fclose(fid);
   
-  // Free memory associated to density fluctuations
+}
+
+// ------ Free arrays associated with isf calculation ------
+void isf_free(double *sim_box, double *xx, double *yy, double *zz,
+	      double *vx, double *vy, double *vz,
+	      double *qq, double complex *drhok, double complex *drhomk,
+	      double complex *fkt){
+
+  free(sim_box);
+  free(xx);
+  free(yy);
+  free(zz);
+  free(vx);
+  free(vy);
+  free(vz);
   free(qq);
   free(drhok);
   free(drhomk);
-
-  // Free memory associated to intermediate scattering function
-  free(Fkt);
+  free(fkt);
 
 }
 
+// ------ Access element of two dimensional array ------
+int idx2(int xx, int yy, int x_size) { 
+  return (yy * x_size) + xx; 
+}
 
-// ------ Compute longitudinal velocity correlation function ------
-void lvcf(){
+// ------ Access element of three dimensional array ------
+int idx3(int xx, int yy, int zz, 
+	 int x_size, int y_size) { 
+  return (zz * x_size * y_size) + (yy * x_size) + xx; 
+}
 
-  // Variables to store the information read from the file
-  int time_step = 0; // Timestep
-  int n_atoms = 0; // Number of atoms
-  double *sim_box = NULL; // Simulation box
-  double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
-  double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
+// ------ Read one file for initialization purposes ------
+void read_file_init(int *out_n_atoms, double *out_min_box_size){
 
-  // Variables to compute the velocity fluctuations
-  bool init = true;
-  double LL, LL_tmp, dq, *qq = NULL;
-  int nq = 0;
-  double complex (*dvk)[G_FILE_NAMES.gl_pathc] = NULL;
-  double complex (*dvmk)[G_FILE_NAMES.gl_pathc] = NULL;  
-  
-  // Loop through the configuration files
-  for (int ii=0; ii<G_FILE_NAMES.gl_pathc; ii++){
-    
-    // Read file content (it is assumed that one file contains one configuration)
-    printf("%s\n",G_FILE_NAMES.gl_pathv[ii]);
-    fflush(stdout); 
-    read_file(ii, &time_step, &n_atoms, &sim_box,
-	      &xx, &yy, &zz, &vx, &vy, &vz);
+  // Variables
+  int n_atoms = -1, foi; 
+  double *sim_box = NULL; 
+  bool n_atoms_flag = false, box_flag = false,
+       input_read = false, fob;
+  gzFile fid;
+  char line[LINE_BUF_SIZE];
 
-    // Initialize calculations (if necessary)
-    if (init) {
-      // Wave-vector resolution
-      LL = sim_box[0];
-      if (sim_box[1] < LL) LL = sim_box[1];
-      if (sim_box[2] < LL) LL = sim_box[2];
-      dq = 2.0*M_PI/LL;
-      // Allocate wave-vector grid
-      nq = (int)G_QMAX/dq;
-      qq = (double*)malloc(sizeof(double) * nq);
-      if (qq == NULL){
-	printf("ERROR: Failed allocation for wave-vector grid\n");
-	exit(EXIT_FAILURE);
+  // Open file
+  fid = gzopen(G_FILE_NAMES.gl_pathv[0], "r");
+  read_line(fid, line);
+
+  // Read file
+  while (!gzeof(fid) && !input_read)
+    {      
+
+      // Get what type of input to expect
+      get_headers_info(line, &fob, &n_atoms_flag,
+		       &box_flag, &fob,
+		       &foi, &foi, &foi,
+		       &foi, &foi, &foi);
+
+      // Read number of atoms
+      if (n_atoms_flag){
+	read_n_atoms(fid, line, &n_atoms);	
+  	n_atoms_flag = false;
       }
-      // Initialize wave-vector grid
-      for (int jj=0; jj<nq; jj++){
-      	qq[jj] = (jj+1)*dq;
+      
+      // Read simulation box info
+      if (box_flag){
+	sim_box = malloc(sizeof(double) * 3);
+	if (sim_box == NULL){
+	  fprintf(stderr, "ERROR: Failed simulation box allocation\n");
+	  exit(EXIT_FAILURE);
+	}
+	read_sim_box(fid, line, sim_box);	
+	box_flag = false;
       }
-      // Allocate matrix to store velocity fluctuations
-      dvk = malloc(sizeof(*dvk) * nq);
-      dvmk = malloc(sizeof(*dvmk) * nq);
-      if (dvk == NULL || dvmk == NULL){
-	printf("ERROR: Failed allocation for density fluctuations\n");
-	exit(EXIT_FAILURE);
-      }      
-      // De-activate initialization
-      init = false;
-    }
-    else {
-      // check that was read is consistent with the previous files
-      LL_tmp = sim_box[0];
-      if (sim_box[1] < LL_tmp) LL_tmp = sim_box[1];
-      if (sim_box[2] < LL_tmp) LL_tmp = sim_box[2];
-      if ( abs(LL_tmp-LL) > 1e-10 ) {
-	printf("ERROR: The simulation box changed for file %s\n", 
-	       (G_FILE_NAMES.gl_pathv[ii]));
-	exit(EXIT_FAILURE);
-      }    
-    }
- 
 
-    // Compute velocity fluctuations
-    for (int jj=0; jj<nq; jj++){
-      dvk[jj][ii] = 0.0 + I*0.0;
-      dvmk[jj][ii] = 0.0 + I*0.0;
-      for (int kk=0; kk<n_atoms; kk++){
-	dvk[jj][ii] += vx[kk]*cexp(I * qq[jj] * xx[kk]);
-	dvmk[jj][ii] += vx[kk]*cexp(-I * qq[jj] * xx[kk]);
-      }
+      // Exit if all the necessary input was read
+      if (n_atoms != -1 && sim_box != NULL)
+	input_read = true;
+      
+      // Read new line
+      read_line(fid, line);
+
     }
-        
-    // Free memory associated to file
-    free(sim_box);
-    free(xx);
-    free(yy);
-    free(zz);
-    free(vx);
-    free(vy);
-    free(vz);
+
+  // Close file
+  gzclose(fid);
   
-  }
+  // Output
+  *out_n_atoms = n_atoms;
+  *out_min_box_size = sim_box[0];
+  if (sim_box[1] < *out_min_box_size) *out_min_box_size = sim_box[1];
+  if (sim_box[2] < *out_min_box_size) *out_min_box_size = sim_box[2];
 
-  // Compute longitudinal velocity correlation function   
-  int lag = (int)G_FILE_NAMES.gl_pathc;
-  double complex (*Ckt)[lag] = malloc(sizeof(*Ckt) * nq);
-  if (Ckt == NULL){
-    printf("ERROR: Failed allocation for longitudinal velocity correlation function \n");
-    exit(EXIT_FAILURE);
-  }
-  int norm_fact;
-  for (int jj=0; jj<nq; jj++){
-    for (int kk=0; kk<lag; kk++){
-      Ckt[jj][kk] = 0.0 + I*0.0;
-      norm_fact = 0;
-      for (int ll=0; ll<lag-kk; ll++){
-      	Ckt[jj][kk] += dvmk[jj][ll]*dvk[jj][kk+ll];
-	norm_fact++;
-      }
-      Ckt[jj][kk] /= norm_fact*n_atoms;
-    }
-  }
-  
-  // Write output
-  FILE *fid;
-  fid = fopen("lvcf_real.dat", "w");
-  /* fprintf(fid, "#########"); */
-  /* for (int ii=0; ii<lag; ii++) fprintf(fid,"%d        ",ii); */
-  /* fprintf(fid, "\n"); */
-  for (int jj=0; jj<nq; jj++){
-    fprintf(fid, "%.8f ", qq[jj]);
-    for (int kk=0; kk<lag; kk++){
-      fprintf(fid, "%.8f ", creal(Ckt[jj][kk]));
-    }
-    fprintf(fid, "\n");
-  }
-  fclose(fid);
-
-  fid = fopen("lvcf_imag.dat", "w");
-  /* fprintf(fid, "#########"); */
-  /* for (int ii=0; ii<lag; ii++) fprintf(fid,"%d        ",ii); */
-  /* fprintf(fid, "\n"); */
-  for (int jj=0; jj<nq; jj++){
-    fprintf(fid, "%.8f ", qq[jj]);
-    for (int kk=0; kk<lag; kk++){
-      fprintf(fid, "%.8f ", cimag(Ckt[jj][kk]));
-    }
-    fprintf(fid, "\n");
-  }
-  fclose(fid);  
-
-  
-  // Free memory associated to density fluctuations
-  free(qq);
-  free(dvk);
-  free(dvmk);
-
-  // Free memory associated to intermediate scattering function
-  free(Ckt);
+  // Free memory
+  free(sim_box);
 
 }
 
-// ------ Read one file ------
-void read_file(int file_id, int *out_time_step, int *out_n_atoms, 
-	       double **out_sim_box,
-	       double **out_xx, double **out_yy, double **out_zz,
-	       double **out_vx, double **out_vy, double **out_vz){
+// ------ Read one file and store the coordinates ------
+void read_file(int file_id, int *time_step, int *n_atoms, 
+	       double *sim_box, double *xx, double *yy, double *zz,
+	       double *vx, double *vy, double *vz){
   
   // Variables
-  int time_step = -1; 
-  int n_atoms = -1; 
-  double *sim_box = NULL; 
-  double *xx = NULL, *yy = NULL, *zz = NULL;
-  double *vx = NULL, *vy = NULL, *vz = NULL;
   bool time_flag = false;
   bool n_atoms_flag = false;
   bool box_flag = false;
   bool config_flag = false;
   int x_idx = -1, y_idx = -1, z_idx = -1;
-  int vx_idx = -1, vy_idx = -1, vz_idx = -1;
+  int vx_idx = -1, vy_idx, vz_idx = -1;
   gzFile fid;
   char line[LINE_BUF_SIZE];
 
@@ -397,47 +413,31 @@ void read_file(int file_id, int *out_time_step, int *out_n_atoms,
 
       // Read time-step
       if (time_flag){
-	read_time_step(fid, line, &time_step);	
+	read_time_step(fid, line, time_step);	
   	time_flag = false;
       }
 
       // Read number of atoms
       if (n_atoms_flag){
-	read_n_atoms(fid, line, &n_atoms);	
+	read_n_atoms(fid, line, n_atoms);	
   	n_atoms_flag = false;
       }
       
       // Read simulation box info
       if (box_flag){
-	sim_box = (double*)malloc(sizeof(double) * 3);
-	if (sim_box == NULL){
-	  fprintf(stderr, "ERROR: Failed simulation box allocation\n");
-	  exit(EXIT_FAILURE);
-	}
 	read_sim_box(fid, line, sim_box);	
 	box_flag = false;
       }
 
 
-      // Read configuration
+      /* // Read configuration */
       if (config_flag){
-	xx = (double*)malloc(sizeof(double) * n_atoms);
-	yy = (double*)malloc(sizeof(double) * n_atoms);
-	zz = (double*)malloc(sizeof(double) * n_atoms);
-	vx = (double*)malloc(sizeof(double) * n_atoms);
-	vy = (double*)malloc(sizeof(double) * n_atoms);
-	vz = (double*)malloc(sizeof(double) * n_atoms);
-	if ((xx == NULL) || (xx == NULL) || (xx == NULL) ||
-	    (vx == NULL) || (vy == NULL) || (vz == NULL) ){
-          fprintf(stderr, "ERROR: Failed configuration allocation\n");
-          exit(EXIT_FAILURE);
-        }
-	read_config(fid, line, n_atoms,
-		    x_idx, y_idx, z_idx,
-		    vx_idx, vy_idx, vz_idx,
-		    xx, yy, zz,
-		    vx, vy, vz);
-  	config_flag = false;
+      	read_config(fid, line, *n_atoms,
+      		    x_idx, y_idx, z_idx,
+      		    vx_idx, vy_idx, vz_idx,
+      		    xx, yy, zz,
+      		    vx, vy, vz);
+      	config_flag = false;
       }
       
       // Read new line
@@ -447,28 +447,6 @@ void read_file(int file_id, int *out_time_step, int *out_n_atoms,
 
   // Close file
   gzclose(fid);
-
-  // Check that all the necessary information was read from the file
-  if ( time_step == -1 || n_atoms == -1 || sim_box == NULL ||
-       xx == NULL || yy == NULL || zz == NULL || 
-       vx == NULL || vy == NULL || vz == NULL ||
-       x_idx == -1 || y_idx == -1 || z_idx == -1 ||
-       vx_idx == -1 || vy_idx == -1 || vz_idx == -1){
-    fprintf(stderr, "ERROR: It was not possible to read all necessary information"
-	    " from the configuration file\n");
-    exit(EXIT_FAILURE);
-  }
-
-  // Output
-  *out_time_step = time_step;
-  *out_n_atoms = n_atoms;
-  *out_sim_box = sim_box;
-  *out_xx = xx;
-  *out_yy = yy;
-  *out_zz = zz;
-  *out_vx = vx;
-  *out_vy = vy;
-  *out_vz = vz;
 
 }
 
@@ -656,16 +634,21 @@ int read_int(char *str){
   num = strtol(str, &end, 10);        //10 specifies base-10
 
   // Check if a number was read
-  if (end == str)    
+  if (end == str){    
     fprintf(stderr, "ERROR: can't convert string to number\n");
+    exit(EXIT_FAILURE);
+  }
 
   // If sizeof(int) == sizeof(long), we have to explicitly check for overflows
-  if ((num == LONG_MAX || num == LONG_MIN) && errno == ERANGE)  
+  if ((num == LONG_MAX || num == LONG_MIN) && errno == ERANGE){  
     fprintf(stderr, "ERROR: number out of range for LONG\n");
-
+    exit(EXIT_FAILURE);
+  }
   // Because strtol produces a long, check for overflow
-  if ( (num > INT_MAX) || (num < INT_MIN) )
+  if ( (num > INT_MAX) || (num < INT_MIN) ){
     fprintf(stderr, "ERROR: number out of range for INT\n");
+    exit(EXIT_FAILURE);
+  }
 
   // Return
   return (int)num;
@@ -684,14 +667,40 @@ double read_double(char *str){
   num = strtod(str, &end);        
 
   // Check if a number was read
-  if (end == str)     
+  if (end == str){     
     fprintf(stderr, "ERROR: can't convert string to number\n");
+    exit(EXIT_FAILURE);
+  }
 
   // Check for overflows
-  if ((num == DBL_MAX || num == DBL_MIN) && errno == ERANGE)  
+  if ((num == DBL_MAX || num == DBL_MIN) && errno == ERANGE){  
     fprintf(stderr, "ERROR: number out of range for LONG\n");
+    exit(EXIT_FAILURE);
+  }
 
   // Return
   return num;
 
 }
+
+// ------ Check that the input from one file is consistent with the initialization
+void check_consistency(int n_atoms_ref, int n_atoms_check, double LL_ref, double *sim_box){
+
+  // Check if the number of atoms is consistent
+  if (n_atoms_check != n_atoms_ref){
+    fprintf(stderr, "ERROR: Number of atoms not consistent with initizialization\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Check if the simulation box is consistent
+  double LL_check = sim_box[0];
+  if (sim_box[1] < LL_check) LL_check = sim_box[1];
+  if (sim_box[2] < LL_check) LL_check = sim_box[2];
+  if ( abs(LL_ref-LL_check) > 1e-10 ) {
+      printf("ERROR: Simulation box not consistent with initialization\n");
+      exit(EXIT_FAILURE);
+  }  
+  
+
+}
+

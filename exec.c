@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <argp.h>
+#include <time.h>
 #include "lmp_corr.h"
 
 // ----------------------------------------
@@ -94,13 +95,24 @@ int main (int argc, char **argv){
   // Parse command line
   argp_parse (&argp, argc, argv, 0, 0, &arguments);
 
-  // Analyze LAMMPS output
+  // Prepare input for LAMMPS analyzer
   input in;
   in.config_file = arguments.config_file;
   in.q_max = arguments.q_max;
   in.isf = arguments.isf;
   in.lvcf = arguments.lvcf;
+
+  // Start timing
+  clock_t t_start = clock();
+
+  // Analyze LAMMPS output
   analyze_lmp(in);
+
+  // Stop timing
+  clock_t t_end = clock();
+  printf("Analysis complete. Elapsed time: %f seconds\n",
+         (double)(t_end - t_start) / CLOCKS_PER_SEC);
+
 
   return 0;
 
