@@ -1,6 +1,18 @@
 #ifndef LMP_CORR_H
 #define LMP_CORR_H
 
+#include <zlib.h>
+
+typedef struct {
+  char *config_file;
+  double q_max;
+  bool isf;
+  bool lvcf;
+
+} input;
+
+void analyze_lmp(input in);
+
 void get_file_names(char *file_pattern);
 
 void isf();

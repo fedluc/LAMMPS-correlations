@@ -19,65 +19,18 @@ static glob_t G_FILE_NAMES; // List of files to load
 static double G_QMAX; // wave-vector cutoff
 
 
-// ------ Main ------
-int main(int argc, char *argv[]) {
-
-  // Default values
-  // Input file
-  char *file_pattern;
-  file_pattern = (char*) malloc(sizeof(char) * 21);
-  strcpy(file_pattern, "trajectories*.dat");
-  // Wave-vector cutoff
-  G_QMAX = 10.0;
-  // Flag for intermediate scattering function calculation
-  int isf_flag = 0;
-  // Flag for longitudinal velocity correlation function
-  int lvcf_flag = 0;
-
-  // Parse command line
-  static const char *usage = "Description coming soon...";
-  int opt;
-  while ((opt = getopt(argc, argv, "hi:q:dv")) != -1) {
-    switch (opt) {
-    case 'i':
-      file_pattern = (char*)realloc(file_pattern, sizeof(char) * (strlen(optarg)+1));
-      strcpy(file_pattern, optarg);
-      break;
-    case 'q':
-      G_QMAX = read_double(optarg);
-      break;
-    case 'd':
-      isf_flag = 1;
-      break;
-    case 'v':
-      lvcf_flag = 1;
-      break;
-    case 'h':
-      printf(usage, argv[0]);
-      exit(EXIT_SUCCESS);
-    case '?':
-      printf("%s: unknown option: -%c\n", argv[0], optopt);
-      printf(usage, argv[0]);
-      exit(EXIT_FAILURE);
-      break;
-    case ':':
-      printf("%s: missing option argument for option: -%c\n", argv[0], optopt);
-      printf(usage, argv[0]);
-      exit(EXIT_FAILURE);
-      break;
-    default:
-      printf(usage, argv[0]);
-      exit(EXIT_FAILURE);
-    }
-  }
+// ------ Caller for the other functions in the file  ------
+void analyze_lmp(input in) {
   
-  
-  // Get file names
-  get_file_names(file_pattern);
+  // Set global variable with file names
+  get_file_names(in.config_file);
+
+  // Set global variable with wave-vector cutoff
+  G_QMAX = in.q_max;
 
   // Compute intermediate scattering function
-  if (isf_flag == 1) isf();
-  if (lvcf_flag == 1) lvcf();
+  if (in.isf) isf();
+  if (in.lvcf) lvcf();
   /* // Compute intermediate scattering function */
   /* clock_t start = clock(); */
   /* isf(); */
@@ -86,11 +39,8 @@ int main(int argc, char *argv[]) {
   /*        (double)(end - start) / CLOCKS_PER_SEC); */
 
   
-  /* // Free memory */
-  /* free(file_pattern); */
-  /* globfree(&G_FILE_NAMES); */
-
-  return 0;
+  // Free memory
+  globfree(&G_FILE_NAMES);
 
 }
 
@@ -355,13 +305,13 @@ void lvcf(){
   int lag = (int)G_FILE_NAMES.gl_pathc;
   double complex (*Ckt)[lag] = malloc(sizeof(*Ckt) * nq);
   if (Ckt == NULL){
-    printf("ERROR: Failed allocation for intermediate scattering function \n");
+    printf("ERROR: Failed allocation for longitudinal velocity correlation function \n");
     exit(EXIT_FAILURE);
   }
   int norm_fact;
   for (int jj=0; jj<nq; jj++){
     for (int kk=0; kk<lag; kk++){
-      Ckt[jj][kk] = 0.0;
+      Ckt[jj][kk] = 0.0 + I*0.0;
       norm_fact = 0;
       for (int ll=0; ll<lag-kk; ll++){
       	Ckt[jj][kk] += dvmk[jj][ll]*dvk[jj][kk+ll];
