@@ -26,6 +26,9 @@ void analyze_lmp(input in) {
   // Set global variable with input from user
   G_IN = in;
 
+  // Set number of threads for parallel calculations
+  omp_set_num_threads(G_IN.num_threads);
+
   // Compute intermediate scattering function
   if (in.isf) isf();
   
@@ -102,7 +105,6 @@ void isf(){
 
 
     //Loop through the wave-vector magnitudes
-    omp_set_num_threads(G_IN.num_threads);
     #pragma omp parallel for
     for (int jj=0; jj<nq; jj++){
       // Loop through the wave-vector directions
@@ -120,10 +122,9 @@ void isf(){
     	  drhok[arr_idx] += cosqk + I * sinqk;
     	  drhomk[arr_idx] += cosqk - I * sinqk;
     	}
-  	if (jj==0) printf("%d %f %f %f %f\n", kk,  creal(drhok[arr_idx]),qq[idx3(jj,kk,0,nq,nq_dir)],qq[idx3(jj,kk,1,nq,nq_dir)],qq[idx3(jj,kk,2,nq,nq_dir)]);
       }
     }
-        
+
   }
 
   // Compute intermediate scattering function (averaged over directions)
@@ -188,12 +189,12 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   //Wave-vector grid
   dq = 2.0*M_PI/LL;
   nq = (int)G_IN.q_max/dq;
-  dtheta = (M_PI/2.0)/(G_IN.num_theta-1);
-  dphi = (M_PI/2.0)/G_IN.num_phi;
+  dtheta = M_PI/(G_IN.num_theta-1);
+  dphi = 2.0*M_PI/G_IN.num_phi;
   if (G_IN.num_theta==1)
     nq_dir = 1;
   else
-    nq_dir = G_IN.num_phi*(G_IN.num_theta-1) + 1;
+    nq_dir = G_IN.num_phi*(G_IN.num_theta-2) + 2;
 
   // Allocate array to store the simulation box information
   sim_box = malloc(sizeof(double) * 3);
@@ -270,7 +271,7 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
     //if (ii==0) printf("%f %f %f\n",qq[idx3(ii, 0, 0, nq, nq_dir)],qq[idx3(ii, 0, 1, nq, nq_dir)],qq[idx3(ii, 0, 2, nq, nq_dir)]);
     // theta > 0 (if necessary)
     if (nq_dir > 1) {
-      for (int jj=0; jj<G_IN.num_theta-1; jj++){
+      for (int jj=0; jj<G_IN.num_theta-2; jj++){
 	qsint = qtmp * sin(dtheta*(jj+1));
 	qcost = qtmp * cos(dtheta*(jj+1));
 	for (int kk=0; kk<G_IN.num_phi; kk++){
@@ -281,8 +282,11 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
 	  qq[idx3(ii, idx_dir, 2, nq, nq_dir)] = qcost;
 	  //if (ii==0) printf("%f %f %f\n",qq[idx3(ii, idx_dir, 0, nq, nq_dir)],qq[idx3(ii, idx_dir, 1, nq, nq_dir)],qq[idx3(ii, idx_dir, 2, nq, nq_dir)]);
 	}
-	
       }
+      // theta = pi
+      qq[idx3(ii, nq_dir-1, 0, nq, nq_dir)] = 0;
+      qq[idx3(ii, nq_dir-1, 1, nq, nq_dir)] = 0;
+      qq[idx3(ii, nq_dir-1, 2, nq, nq_dir)] = qtmp;
     }
   }
 
