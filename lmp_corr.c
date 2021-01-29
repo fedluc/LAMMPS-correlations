@@ -88,7 +88,7 @@ void isf(){
   	   &drhok, &drhomk, &fkt);
 
   
-  // Loop through the configuration files
+  /* // Loop through the configuration files */
   for (int ii=0; ii<n_files; ii++){
     
     // Read file content (it is assumed that one file contains one configuration)
@@ -120,6 +120,7 @@ void isf(){
     	  drhok[arr_idx] += cosqk + I * sinqk;
     	  drhomk[arr_idx] += cosqk - I * sinqk;
     	}
+  	if (jj==0) printf("%d %f %f %f %f\n", kk,  creal(drhok[arr_idx]),qq[idx3(jj,kk,0,nq,nq_dir)],qq[idx3(jj,kk,1,nq,nq_dir)],qq[idx3(jj,kk,2,nq,nq_dir)]);
       }
     }
         
@@ -132,7 +133,7 @@ void isf(){
   	arr_idx = idx2(jj,kk,nq);
   	for (int ll=0; ll<n_files-kk; ll++){
   	  fkt[arr_idx] += drhomk[idx3(jj,ii,ll,nq,nq_dir)]*
-	    drhok[idx3(jj,ii,kk+ll,nq,nq_dir)]/(nq_dir*n_atoms);
+  	    drhok[idx3(jj,ii,kk+ll,nq,nq_dir)]/(nq_dir*n_atoms);
   	}
       }
     }
@@ -169,9 +170,9 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
 	      double complex **out_drhomk, double complex **out_fkt){
 
   // Variables 
-  int n_atoms = 0, nq = 0, ntheta = 0, nphi = 0, 
-    n_files = G_FILE_NAMES.gl_pathc, nq_dir = 0, idx_dir = 0;
-  double LL, dq, qtmp, qsint, qcost;
+  int n_atoms = 0, nq = 0, n_files = G_FILE_NAMES.gl_pathc, 
+    nq_dir = 0, idx_dir = 0;
+  double LL, dq, dtheta, dphi, qtmp, qsint, qcost;
   double *sim_box = NULL, *xx = NULL, *yy = NULL, *zz = NULL,
     *vx = NULL, *vy = NULL, *vz = NULL, *qq = NULL;
   double complex *drhok = NULL, *drhomk = NULL, *fkt = NULL;
@@ -187,9 +188,12 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   //Wave-vector grid
   dq = 2.0*M_PI/LL;
   nq = (int)G_IN.q_max/dq;
-  ntheta = (int)(M_PI/G_IN.dtheta) + 1;
-  nphi = (int)(2.0*M_PI/G_IN.dphi);
-  nq_dir = nphi*(ntheta-2) + 2;
+  dtheta = (M_PI/2.0)/(G_IN.num_theta-1);
+  dphi = (M_PI/2.0)/G_IN.num_phi;
+  if (G_IN.num_theta==1)
+    nq_dir = 1;
+  else
+    nq_dir = G_IN.num_phi*(G_IN.num_theta-1) + 1;
 
   // Allocate array to store the simulation box information
   sim_box = malloc(sizeof(double) * 3);
@@ -259,23 +263,27 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   // Initialize the wave-vector grid
   for (int ii=0; ii<nq; ii++){
     qtmp = (ii+1)*dq;
-    for (int jj=0; jj<ntheta-2; jj++){
-      qsint = qtmp * sin(G_IN.dtheta*(jj+1));
-      qcost = qtmp * cos(G_IN.dtheta*(jj+1));
-      for (int kk=0; kk<nphi; kk++){
-      	idx_dir = jj*nphi + kk + 1;
-      	qq[idx3(ii, idx_dir, 0, nq, nq_dir)] = qsint * cos(G_IN.dphi*kk);
-      	qq[idx3(ii, idx_dir, 1, nq, nq_dir)] = qsint * sin(G_IN.dphi*kk);
-      	qq[idx3(ii, idx_dir, 2, nq, nq_dir)] = qcost;
-      }
-    }
-    // Add separately the entries for theta = 0 and theta = pi
+    // theta = 0 
     qq[idx3(ii, 0, 0, nq, nq_dir)] = 0;
     qq[idx3(ii, 0, 1, nq, nq_dir)] = 0;
     qq[idx3(ii, 0, 2, nq, nq_dir)] = qtmp;
-    qq[idx3(ii, nq_dir-1, 0, nq, nq_dir)] = 0;
-    qq[idx3(ii, nq_dir-1, 1, nq, nq_dir)] = 0;
-    qq[idx3(ii, nq_dir-1, 2, nq, nq_dir)] = -qtmp;
+    //if (ii==0) printf("%f %f %f\n",qq[idx3(ii, 0, 0, nq, nq_dir)],qq[idx3(ii, 0, 1, nq, nq_dir)],qq[idx3(ii, 0, 2, nq, nq_dir)]);
+    // theta > 0 (if necessary)
+    if (nq_dir > 1) {
+      for (int jj=0; jj<G_IN.num_theta-1; jj++){
+	qsint = qtmp * sin(dtheta*(jj+1));
+	qcost = qtmp * cos(dtheta*(jj+1));
+	for (int kk=0; kk<G_IN.num_phi; kk++){
+	  idx_dir = jj*G_IN.num_phi + kk + 1;
+	  //if (ii==0) printf("%d\n",idx_dir);
+	  qq[idx3(ii, idx_dir, 0, nq, nq_dir)] = qsint * cos(dphi*kk);
+	  qq[idx3(ii, idx_dir, 1, nq, nq_dir)] = qsint * sin(dphi*kk);
+	  qq[idx3(ii, idx_dir, 2, nq, nq_dir)] = qcost;
+	  //if (ii==0) printf("%f %f %f\n",qq[idx3(ii, idx_dir, 0, nq, nq_dir)],qq[idx3(ii, idx_dir, 1, nq, nq_dir)],qq[idx3(ii, idx_dir, 2, nq, nq_dir)]);
+	}
+	
+      }
+    }
   }
 
   // Initialize intermediate scattering function

@@ -29,10 +29,10 @@ static struct argp_option options[] = {
    "Use this flag to compute the longitudinal velocity correlation function" },
   {"num_threads",   'n', "NUM_THREADS", 0,
    "Number of threads to use for the parallel computations with openMP"},
-  {"theta",   't', "DTHETA", 0,
-   "Angular resolution for the wave-vector directions (polar component)"},
-  {"phi",   'p', "DPHI", 0,
-   "Angular resolution for the wave-vector directions (azimutal component)"},
+  {"theta",   't', "NUM_THETA", 0,
+   "Number of wave-vector directions (polar component)"},
+  {"phi",   'p', "NUM_PHI", 0,
+   "Number of wave-vector directions (azimutal component)"},
   { 0 }
 };
 
@@ -44,8 +44,8 @@ struct arguments
   bool lvcf;
   char *config_file;
   double q_max;
-  double dtheta;
-  double dphi;
+  int num_theta;
+  int num_phi;
   int num_threads;
   
 };
@@ -71,13 +71,13 @@ parse_opt (int key, char *arg, struct argp_state *state)
       arguments->num_threads = atoi(arg);
       break;
     case 'p':
-      arguments->dphi = atof(arg);
+      arguments->num_phi = atoi(arg);
       break;
     case 'q':
       arguments->q_max = atof(arg);
       break;
     case 't':
-      arguments->dtheta = atof(arg);
+      arguments->num_theta = atoi(arg);
       break;
     case 'v':
       arguments->lvcf = true;
@@ -111,8 +111,8 @@ int main (int argc, char **argv){
   arguments.lvcf = false;
   arguments.config_file  = "trajectories*.dat.gz";
   arguments.q_max = 10.0;
-  arguments.dtheta = M_PI/4.0;
-  arguments.dphi = M_PI/4.0;
+  arguments.num_theta = 2;
+  arguments.num_phi = 2;
   arguments.num_threads = 16;
 
   // Parse command line
@@ -124,8 +124,8 @@ int main (int argc, char **argv){
   in.lvcf = arguments.lvcf;
   in.config_file = arguments.config_file;
   in.q_max = arguments.q_max;
-  in.dtheta = arguments.dtheta;
-  in.dphi = arguments.dphi;
+  in.num_theta = arguments.num_theta;
+  in.num_phi = arguments.num_phi;
   in.num_threads = arguments.num_threads;
 
   // Analyze LAMMPS output

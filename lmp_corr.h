@@ -10,8 +10,8 @@ typedef struct {
   bool lvcf;
   char *config_file;
   double q_max;
-  double dtheta;
-  double dphi;
+  double num_theta;
+  double num_phi;
   int num_threads;
 
 } input;
