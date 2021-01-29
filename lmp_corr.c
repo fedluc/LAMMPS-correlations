@@ -267,7 +267,7 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
     // theta = 0 
     qq[idx3(ii, 0, 0, nq, nq_dir)] = 0;
     qq[idx3(ii, 0, 1, nq, nq_dir)] = 0;
-    qq[idx3(ii, 0, 2, nq, nq_dir)] = qtmp;
+    qq[idx3(ii, 0, 2, nq, nq_dir)] = 0;
     //if (ii==0) printf("%f %f %f\n",qq[idx3(ii, 0, 0, nq, nq_dir)],qq[idx3(ii, 0, 1, nq, nq_dir)],qq[idx3(ii, 0, 2, nq, nq_dir)]);
     // theta > 0 (if necessary)
     if (nq_dir > 1) {
@@ -286,7 +286,8 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
       // theta = pi
       qq[idx3(ii, nq_dir-1, 0, nq, nq_dir)] = 0;
       qq[idx3(ii, nq_dir-1, 1, nq, nq_dir)] = 0;
-      qq[idx3(ii, nq_dir-1, 2, nq, nq_dir)] = qtmp;
+      qq[idx3(ii, nq_dir-1, 2, nq, nq_dir)] = -qtmp;
+      //if (ii==0) printf("%f %f %f\n",qq[idx3(ii, nq_dir-1, 0, nq, nq_dir)],qq[idx3(ii, nq_dir-1, 1, nq, nq_dir)],qq[idx3(ii, nq_dir-1, 2, nq, nq_dir)]);
     }
   }
 
