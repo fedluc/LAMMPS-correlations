@@ -202,6 +202,7 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
 
   //Wave-vector grid
   dq = 2.0*M_PI/LL;
+  nq = (int)G_IN.q_max/dq;
   dtheta = M_PI/(G_IN.num_theta-1);
   dphi = 2.0*M_PI/G_IN.num_phi;
   if (G_IN.num_theta==1)
@@ -524,6 +525,7 @@ void lvcf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
 
   //Wave-vector grid
   dq = 2.0*M_PI/LL;
+  nq = (int)G_IN.q_max/dq;
   dtheta = M_PI/(G_IN.num_theta-1);
   dphi = 2.0*M_PI/G_IN.num_phi;
   if (G_IN.num_theta==1)
