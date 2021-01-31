@@ -15,7 +15,7 @@
 # define LINE_BUF_SIZE 1024 // maximum line length from input
 
 static glob_t G_FILE_NAMES; // List of files to load
-static input G_IN;
+static input G_IN; // Input
 
 // -------------------------------------------------------------------
 // CALLER FOR THE OTHER FUNCTIONS IN THE FILE
@@ -24,11 +24,12 @@ static input G_IN;
 // ------ Caller for the other functions in the file  ------
 void analyze_lmp(input in) {
 
-  // Set global variable with file names
-  get_file_names(in.config_file);
-
   // Set global variable with input from user
   G_IN = in;
+
+  // Set global variable with file names
+  if (strcmp(G_IN.fluct_file, "NO-INPUT")==0) get_file_names(in.config_file);
+  
 
   // Set number of threads for parallel calculations
   omp_set_num_threads(G_IN.num_threads);
@@ -52,7 +53,7 @@ void analyze_lmp(input in) {
 void isf(){
 
   // Variables to store the information read from the file
-  int n_files = G_FILE_NAMES.gl_pathc; // Number of files
+  int n_files; // Number of files
   int n_atoms = 0; // Number of atoms
   double *sim_box = NULL; // Simulation box
   double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
@@ -70,17 +71,28 @@ void isf(){
   double complex *fkt = NULL;
   double norm_fact;
 
-  // Initialize
-  init_corr(&n_atoms, &LL, &dq, &nq,
-	    &nq_dir, &sim_box,
-	    &xx, &yy, &zz,
-	    &vx, &vy, &vz, &qq,
-	    &drhok, &drhomk, &fkt);
+  if (strcmp(G_IN.fluct_file, "NO-INPUT")==0){ // Analyze LAMMPS configurations
 
-  // Compute density fluctuations
-  compute_fluct(n_atoms, LL, dq, nq, nq_dir, sim_box,
-		xx, yy, zz, vx, vy, vz, qq, 
-		drhok, drhomk, false);
+    // Set number of files
+    n_files = G_FILE_NAMES.gl_pathc;
+
+    // Initialize
+    init_corr(&n_atoms, &LL, &dq, &nq,
+	      &nq_dir, &sim_box,
+	      &xx, &yy, &zz,
+	      &vx, &vy, &vz, &qq,
+	      &drhok, &drhomk, &fkt);
+    
+    // Compute density fluctuations
+    compute_fluct(n_atoms, LL, dq, nq, nq_dir, sim_box,
+		  xx, yy, zz, vx, vy, vz, qq, 
+		  drhok, drhomk, false);
+
+  }
+  else { // Load pre-computed fluctuations
+    fluct_input(drhok, drhomk, qq, dq, nq, n_files, nq_dir, false); 
+  }
+
 
   // Compute intermediate scattering function (averaged over directions)
   int arr_idx;
@@ -168,7 +180,7 @@ void isf_output(double complex *fkt, double dq, int nq, int n_files){
 void lvcf(){
 
   // Variables to store the information read from the file
-  int n_files = G_FILE_NAMES.gl_pathc;// Number of files
+  int n_files;// Number of files
   int n_atoms = 0; // Number of atoms
   double *sim_box = NULL; // Simulation box
   double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
@@ -186,17 +198,28 @@ void lvcf(){
   double complex *ckt = NULL;
   double norm_fact;
 
-  // Initialize
-  init_corr(&n_atoms, &LL, &dq, &nq,
-	    &nq_dir, &sim_box,
-	    &xx, &yy, &zz,
-	    &vx, &vy, &vz, &qq,
-	    &dvk, &dvmk, &ckt);
 
-  // Compute velocity fluctuations
-  compute_fluct(n_atoms, LL, dq, nq, nq_dir, sim_box,
-		xx, yy, zz, vx, vy, vz, qq, 
-		dvk, dvmk, true);
+  if (strcmp(G_IN.fluct_file, "NO-INPUT")==0){ // Analyze LAMMPS configurations
+
+    // Set number of files
+    n_files = G_FILE_NAMES.gl_pathc;
+
+    // Initialize
+    init_corr(&n_atoms, &LL, &dq, &nq,
+	      &nq_dir, &sim_box,
+	      &xx, &yy, &zz,
+	      &vx, &vy, &vz, &qq,
+	      &dvk, &dvmk, &ckt);
+    
+    // Compute velocity fluctuations
+    compute_fluct(n_atoms, LL, dq, nq, nq_dir, sim_box,
+		  xx, yy, zz, vx, vy, vz, qq, 
+		  dvk, dvmk, true);
+  }
+  else { // Load pre-computed fluctuations
+    fluct_input(dvk, dvmk, qq, dq, nq, n_files, nq_dir, true); 
+
+  }
 
   // Compute longitudinal velocity correlation function (averaged over directions)
   int arr_idx;
@@ -336,66 +359,112 @@ void compute_fluct(int n_atoms, double LL, double dq, int nq,
   }
 
   // Write output
-  fluct_output(dfk, dq, nq, n_files, nq_dir, vel);
+  fluct_output(dfk, dfmk, qq, dq, nq, n_files, nq_dir, vel);
 
 
 }
 
-// ------ Write output for lvcf calculations ------
-void fluct_output(double complex *dfk, double dq, int nq, 
+// ------ Write output for fluctuations ------
+void fluct_output(double complex *dfk, double complex *dfmk, 
+		  double *qq, double dq, int nq, 
 		  int n_files, int nq_dir, bool vel){
   
-  
-  FILE *fid;
-  
-  // Real part
-  if (vel) fid = fopen("dv_real.dat", "w");
-  else fid = fopen("drho_real.dat", "w");
-  fprintf(fid, "ITEM: NUMBER OF WAVE-VECTORS (k)\n");
-  fprintf(fid, "%d\n", nq);
-  fprintf(fid, "ITEM: NUMBER OF TIME-STEPS (t)\n");
-  fprintf(fid, "%d\n", n_files);
-  fprintf(fid, "ITEM: TIME-STEP (dt)\n");
-  fprintf(fid, "%f\n", G_IN.dt);
-  fprintf(fid, "ITEM: NUMBER OF DIRECTIONS\n");
-  fprintf(fid, "%d\n", nq_dir);
-  for (int ii=0; ii<nq_dir; ii++){
-    if (vel) fprintf(fid, "ITEM: VELOCITY FLUCTUATIONS: k, t=0, t=dt, t=2*dt, ...\n"); 
-    else fprintf(fid, "ITEM: DENSITY FLUCTUATIONS: k, t=0, t=dt, t=2*dt, ...\n");
-    for (int jj=0; jj<nq; jj++){
-      fprintf(fid, "%.8f ", (jj+1)*dq);
-      for (int kk=0; kk<n_files; kk++){
-	fprintf(fid, "%.8f ", creal(dfk[idx3(jj,ii,kk,nq,nq_dir)]));
-      }
-      fprintf(fid, "\n");
-    }
+  // Open binary file
+  FILE *fid = NULL;
+  if (vel) fid = fopen("vel_fluct.bin", "wb");
+  else fid = fopen("dens_fluct.bin", "wb");
+  if (fid == NULL) {
+    perror("Error while creating configuration file\n");
+    exit(EXIT_FAILURE);
   }
+
+  // Fluctuation identifier
+  fwrite(&vel, sizeof(bool), 1, fid);
+
+  // Number of wave-vectors magnitudes
+  fwrite(&nq, sizeof(int), 1, fid);
+
+  // Magnitude step
+  fwrite(&dq, sizeof(double), 1, fid);
+
+  // Number of wave-vectors directions
+  fwrite(&nq_dir, sizeof(int), 1, fid);
+
+  // Number of time-steps
+  fwrite(&n_files, sizeof(int), 1, fid);
+
+  // Time-step
+  fwrite(&G_IN.dt, sizeof(double), 1, fid);
+
+  // Wave-vectors
+  fwrite(qq, sizeof(double complex), nq * nq_dir * 3, fid);
+
+  // Fluctuations
+  fwrite(dfk, sizeof(double complex), nq * nq_dir * n_files, fid);
+
+  // Fluctuations (complex conjugate)
+  fwrite(dfmk, sizeof(double complex), nq * nq_dir * n_files, fid);
+
+  // Close binary file
   fclose(fid);
+
+}
+
+
+// ------ Read fluctuations from file ------
+void fluct_input(double complex *dfk, double complex *dfmk, 
+		 double *qq, double dq, int nq, 
+		 int n_files, int nq_dir, bool vel){
   
-  // Imaginary
-  if (vel) fid = fopen("dv_imag.dat", "w");
-  else fid = fopen("drho_imag.dat", "w");
-  fprintf(fid, "ITEM: NUMBER OF WAVE-VECTORS (k)\n");
-  fprintf(fid, "%d\n", nq);
-  fprintf(fid, "ITEM: NUMBER OF TIME-STEPS (t)\n");
-  fprintf(fid, "%d\n", n_files);
-  fprintf(fid, "ITEM: TIME-STEP (dt)\n");
-  fprintf(fid, "%f\n", G_IN.dt);
-  fprintf(fid, "ITEM: NUMBER OF DIRECTIONS\n");
-  fprintf(fid, "%d\n", nq_dir);
-  for (int ii=0; ii<nq_dir; ii++){
-    if (vel) fprintf(fid, "ITEM: VELOCITY FLUCTUATIONS: k, t=0, t=dt, t=2*dt, ...\n"); 
-    else fprintf(fid, "ITEM: DENSITY FLUCTUATIONS: k, t=0, t=dt, t=2*dt, ...\n");
-    for (int jj=0; jj<nq; jj++){
-      fprintf(fid, "%.8f ", (jj+1)*dq);
-      for (int kk=0; kk<n_files; kk++){
-	fprintf(fid, "%.8f ", cimag(dfk[idx3(jj,ii,kk,nq,nq_dir)]));
-      }
-      fprintf(fid, "\n");
-    }
+
+  // Variables
+  bool vel_check;
+
+  // Open binary file
+  FILE *fid = NULL;
+  if (vel) fid = fopen("vel_fluct.bin", "rb");
+  else fid = fopen("dens_fluct.bin", "rb");
+  if (fid == NULL) {
+    perror("Error while opening configuration file\n");
+    exit(EXIT_FAILURE);
   }
-  fclose(fid);
+
+  // Fluctuation identifier
+  fread(&vel_check, sizeof(bool), 1, fid);
+  if (vel_check != vel){
+    if (vel) printf("ERROR: Attempt to load velocity fluctuations from file %s, but file %s contains only density fluctuations\n",
+		    G_IN.fluct_file, G_IN.fluct_file);
+    else printf("ERROR: Attempt to load density fluctuations from file %s, but file %s contains only velocity fluctuations\n",
+		    G_IN.fluct_file, G_IN.fluct_file);
+  }
   
+  // Number of wave-vectors magnitudes
+  fread(&nq, sizeof(int), 1, fid);
+
+  // Magnitude step
+  fread(&dq, sizeof(double), 1, fid);
+
+  // Number of wave-vectors directions
+  fread(&nq_dir, sizeof(int), 1, fid);
+
+  // Number of time-steps
+  fread(&n_files, sizeof(int), 1, fid);
+
+  // Time-step
+  fread(&G_IN.dt, sizeof(double), 1, fid);
+
+  // Wave-vectors
+  fread(qq, sizeof(double complex), nq * nq_dir * 3, fid);
+
+  // Fluctuations
+  fread(dfk, sizeof(double complex), nq * nq_dir * n_files, fid);
+
+  // Fluctuations (complex conjugate)
+  fread(dfmk, sizeof(double complex), nq * nq_dir * n_files, fid);
+
+  // Close binary file
+  fclose(fid);
+
 }
 
 

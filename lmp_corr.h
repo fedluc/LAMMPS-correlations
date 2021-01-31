@@ -9,11 +9,12 @@ typedef struct {
   bool isf;
   bool lvcf;
   char *config_file;
+  char *fluct_file;
   double q_max;
   double num_theta;
   double num_phi;
-  int num_threads;
   double dt;
+  int num_threads;
 
 } input;
 
@@ -52,7 +53,12 @@ void compute_fluct(int n_atoms, double LL, double dq, int nq,
                    double *qq, double complex *dfk, double complex *dfmk,
                    bool vel);
 
-void fluct_output(double complex *dfk, double dq, int nq,
+void fluct_output(double complex *dfk, double complex *dfmk,
+                  double *qq, double dq, int nq,
+                  int n_files, int nq_dir, bool vel);
+
+void fluct_input(double complex *dfk, double complex *dfmk,
+                  double *qq, double dq, int nq,
                   int n_files, int nq_dir, bool vel);
 
 // -------------------------------------------------------------------

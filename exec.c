@@ -25,7 +25,7 @@ static struct argp_option options[] = {
   "Wave-vector cutoff"},
   {"isf",   'd', 0, 0,
    "Use this flag to compute the intermediate scattering function" },
-  {"lvcf",   'v', 0, 0,
+  {"lvcf",   'l', 0, 0,
    "Use this flag to compute the longitudinal velocity correlation function" },
   {"num_threads",   'n', "NUM_THREADS", 0,
    "Number of threads to use for the parallel computations with openMP"},
@@ -33,8 +33,10 @@ static struct argp_option options[] = {
    "Number of wave-vector directions (polar component)"},
   {"phi",   'p', "NUM_PHI", 0,
    "Number of wave-vector directions (azimutal component)"},
-  {"dt",   't', "TIME_STEP", 0,
+  {"dt",   'd', "TIME_STEP", 0,
    "Time interval used to save the configurations"},
+  {"fluct",   'f', "FLUCT_FILE", 0,
+   "Binary file with fluctuations"},
   { 0 }
 };
 
@@ -45,11 +47,12 @@ struct arguments
   bool isf;
   bool lvcf;
   char *config_file;
+  char *fluct_file;
   double q_max;
+  double dt;
   int num_theta;
   int num_phi;
   int num_threads;
-  double dt;
 
 };
 
@@ -68,7 +71,16 @@ parse_opt (int key, char *arg, struct argp_state *state)
       arguments->config_file = arg;
       break;
     case 'd':
+      arguments->dt = atof(arg);
+      break;
+    case 'f':
+      arguments->fluct_file = arg;
+      break;
+    case 'i':
       arguments->isf = true;
+      break;
+    case 'l':
+      arguments->lvcf = true;
       break;
     case 'n':
       arguments->num_threads = atoi(arg);
@@ -81,9 +93,6 @@ parse_opt (int key, char *arg, struct argp_state *state)
       break;
     case 't':
       arguments->num_theta = atoi(arg);
-      break;
-    case 'v':
-      arguments->lvcf = true;
       break;
 
     case ARGP_KEY_ARG:
@@ -113,11 +122,12 @@ int main (int argc, char **argv){
   arguments.isf = false;
   arguments.lvcf = false;
   arguments.config_file  = "trajectories*.dat.gz";
+  arguments.fluct_file  = "NO-INPUT";
   arguments.q_max = 10.0;
+  arguments.dt = 1;
   arguments.num_theta = 1;
   arguments.num_phi = 1;
   arguments.num_threads = 1;
-  arguments.dt = 1;
 
   // Parse command line
   argp_parse (&argp, argc, argv, 0, 0, &arguments);
@@ -127,11 +137,12 @@ int main (int argc, char **argv){
   in.isf = arguments.isf;
   in.lvcf = arguments.lvcf;
   in.config_file = arguments.config_file;
+  in.fluct_file = arguments.config_file;
   in.q_max = arguments.q_max;
+  in.dt = arguments.dt;
   in.num_theta = arguments.num_theta;
   in.num_phi = arguments.num_phi;
   in.num_threads = arguments.num_threads;
-  in.dt = arguments.dt;
 
   // Analyze LAMMPS output
   double start = omp_get_wtime();
