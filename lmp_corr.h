@@ -55,11 +55,12 @@ void compute_fluct(int n_atoms, double LL, double dq, int nq,
 
 void fluct_output(double complex *dfk, double complex *dfmk,
                   double *qq, double dq, int nq,
-                  int n_files, int nq_dir, bool vel);
+                  int n_files, int nq_dir, int n_atoms, bool vel);
 
-void fluct_input(double complex *dfk, double complex *dfmk,
-                  double *qq, double dq, int nq,
-                  int n_files, int nq_dir, bool vel);
+void fluct_input(int *out_n_atoms, double *out_dq, int *out_nq,  int *out_nq_dir,
+                 int *out_n_files, double **out_qq,
+                 double complex **out_dfk, double complex **out_dfmk,
+                 double complex **out_cf, bool vel);
 
 // -------------------------------------------------------------------
 // FUNCTIONS USED TO INITIALIZE AND FREE MEMORY

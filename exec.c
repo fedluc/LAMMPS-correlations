@@ -137,7 +137,7 @@ int main (int argc, char **argv){
   in.isf = arguments.isf;
   in.lvcf = arguments.lvcf;
   in.config_file = arguments.config_file;
-  in.fluct_file = arguments.config_file;
+  in.fluct_file = arguments.fluct_file;
   in.q_max = arguments.q_max;
   in.dt = arguments.dt;
   in.num_theta = arguments.num_theta;

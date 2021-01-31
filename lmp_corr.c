@@ -30,7 +30,6 @@ void analyze_lmp(input in) {
   // Set global variable with file names
   if (strcmp(G_IN.fluct_file, "NO-INPUT")==0) get_file_names(in.config_file);
   
-
   // Set number of threads for parallel calculations
   omp_set_num_threads(G_IN.num_threads);
 
@@ -53,16 +52,16 @@ void analyze_lmp(input in) {
 void isf(){
 
   // Variables to store the information read from the file
-  int n_files; // Number of files
+  int n_files = 0; // Number of files
   int n_atoms = 0; // Number of atoms
   double *sim_box = NULL; // Simulation box
   double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
   double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
 
   // Variables to compute the density fluctuations
-  int nq, nq_dir; // Number of points in the wave-vector grid
-  double dq; // Resolution of the wave-vector grid
-  double LL; // Smallest simulation box size 
+  int nq = 0, nq_dir = 0; // Number of points in the wave-vector grid
+  double dq = 0; // Resolution of the wave-vector grid
+  double LL = 0; // Smallest simulation box size 
   double *qq = NULL; // Wave-vector grid
   double complex *drhok = NULL; // Density fluctuations
   double complex *drhomk = NULL; // Density fluctuations (complex conjugate)
@@ -90,7 +89,8 @@ void isf(){
 
   }
   else { // Load pre-computed fluctuations
-    fluct_input(drhok, drhomk, qq, dq, nq, n_files, nq_dir, false); 
+    fluct_input(&n_atoms, &dq, &nq, &nq_dir, &n_files, 
+		&qq, &drhok, &drhomk, &fkt, false); 
   }
 
 
@@ -180,16 +180,16 @@ void isf_output(double complex *fkt, double dq, int nq, int n_files){
 void lvcf(){
 
   // Variables to store the information read from the file
-  int n_files;// Number of files
+  int n_files = 0; // Number of files
   int n_atoms = 0; // Number of atoms
   double *sim_box = NULL; // Simulation box
   double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
   double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
 
-  // Variables to compute the velocity fluctuations
-  int nq, nq_dir; // Number of points in the wave-vector grid
-  double dq; // Resolution of the wave-vector grid
-  double LL; // Smallest simulation box size 
+  // Variables to compute the density fluctuations
+  int nq = 0, nq_dir = 0; // Number of points in the wave-vector grid
+  double dq = 0; // Resolution of the wave-vector grid
+  double LL = 0; // Smallest simulation box size 
   double *qq = NULL; // Wave-vector grid
   double complex *dvk = NULL; // Velocity fluctuations
   double complex *dvmk = NULL; // Velocity fluctuations (complex conjugate)
@@ -217,8 +217,8 @@ void lvcf(){
 		  dvk, dvmk, true);
   }
   else { // Load pre-computed fluctuations
-    fluct_input(dvk, dvmk, qq, dq, nq, n_files, nq_dir, true); 
-
+    fluct_input(&n_atoms, &dq, &nq, &nq_dir, &n_files, 
+		&qq, &dvk, &dvmk, &ckt, true); 
   }
 
   // Compute longitudinal velocity correlation function (averaged over directions)
@@ -359,7 +359,7 @@ void compute_fluct(int n_atoms, double LL, double dq, int nq,
   }
 
   // Write output
-  fluct_output(dfk, dfmk, qq, dq, nq, n_files, nq_dir, vel);
+  fluct_output(dfk, dfmk, qq, dq, nq, n_files, nq_dir, n_atoms, vel);
 
 
 }
@@ -367,14 +367,14 @@ void compute_fluct(int n_atoms, double LL, double dq, int nq,
 // ------ Write output for fluctuations ------
 void fluct_output(double complex *dfk, double complex *dfmk, 
 		  double *qq, double dq, int nq, 
-		  int n_files, int nq_dir, bool vel){
+		  int n_files, int nq_dir, int n_atoms, bool vel){
   
   // Open binary file
   FILE *fid = NULL;
   if (vel) fid = fopen("vel_fluct.bin", "wb");
   else fid = fopen("dens_fluct.bin", "wb");
   if (fid == NULL) {
-    perror("Error while creating configuration file\n");
+    fprintf(stderr,"Error while creating fluctuation file");
     exit(EXIT_FAILURE);
   }
 
@@ -396,6 +396,9 @@ void fluct_output(double complex *dfk, double complex *dfmk,
   // Time-step
   fwrite(&G_IN.dt, sizeof(double), 1, fid);
 
+  // Number of atoms
+  fwrite(&n_atoms, sizeof(int), 1, fid);
+
   // Wave-vectors
   fwrite(qq, sizeof(double complex), nq * nq_dir * 3, fid);
 
@@ -412,30 +415,35 @@ void fluct_output(double complex *dfk, double complex *dfmk,
 
 
 // ------ Read fluctuations from file ------
-void fluct_input(double complex *dfk, double complex *dfmk, 
-		 double *qq, double dq, int nq, 
-		 int n_files, int nq_dir, bool vel){
+void fluct_input(int *out_n_atoms, double *out_dq, int *out_nq,  int *out_nq_dir, 
+		 int *out_n_files, double **out_qq, 
+		 double complex **out_dfk, double complex **out_dfmk, 
+		 double complex **out_cf, bool vel){
   
 
   // Variables
-  bool vel_check;
+  bool vel_r;
+  int n_atoms, nq, n_files, nq_dir;
+  double dq, *qq;
+  double complex *dfk, *dfmk, *cf;
 
   // Open binary file
   FILE *fid = NULL;
   if (vel) fid = fopen("vel_fluct.bin", "rb");
   else fid = fopen("dens_fluct.bin", "rb");
   if (fid == NULL) {
-    perror("Error while opening configuration file\n");
+    fprintf(stderr,"Error while opening fluctuation file\n");
     exit(EXIT_FAILURE);
   }
 
   // Fluctuation identifier
-  fread(&vel_check, sizeof(bool), 1, fid);
-  if (vel_check != vel){
-    if (vel) printf("ERROR: Attempt to load velocity fluctuations from file %s, but file %s contains only density fluctuations\n",
+  fread(&vel_r, sizeof(bool), 1, fid);
+  if (vel_r != vel){
+    if (vel) fprintf(stderr,"ERROR: Attempt to load velocity fluctuations from file %s, but file %s contains only density fluctuations\n",
 		    G_IN.fluct_file, G_IN.fluct_file);
-    else printf("ERROR: Attempt to load density fluctuations from file %s, but file %s contains only velocity fluctuations\n",
+    else fprintf(stderr,"ERROR: Attempt to load density fluctuations from file %s, but file %s contains only velocity fluctuations\n",
 		    G_IN.fluct_file, G_IN.fluct_file);
+    exit(EXIT_FAILURE);
   }
   
   // Number of wave-vectors magnitudes
@@ -453,6 +461,36 @@ void fluct_input(double complex *dfk, double complex *dfmk,
   // Time-step
   fread(&G_IN.dt, sizeof(double), 1, fid);
 
+  // Number of atoms
+  fread(&n_atoms, sizeof(int), 1, fid);
+
+  // Allocate array for wave-vector grid
+  qq = malloc(sizeof(double) * nq * nq_dir * 3);
+  if (qq == NULL){
+    fprintf(stderr,"ERROR: Failed allocation for wave-vector grid array (qq)\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Allocate arrays for fluctuations
+  dfk = malloc(sizeof(double complex) * nq * nq_dir * n_files);
+  if (dfk == NULL){
+    fprintf(stderr,"ERROR: Failed allocation for fluctuations array (dfk)\n");
+    exit(EXIT_FAILURE);
+  }
+  dfmk = malloc(sizeof(double complex) * nq * nq_dir * n_files);
+  if (dfmk == NULL){
+    fprintf(stderr,"ERROR: Failed allocation for fluctuations array (dfmk) \n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Allocate array for correlation function
+  cf = malloc(sizeof(double complex) * nq * n_files);
+  if (cf == NULL){
+    fprintf(stderr,"ERROR: Failed allocation for correlation function\n");
+    exit(EXIT_FAILURE);
+  }
+
+
   // Wave-vectors
   fread(qq, sizeof(double complex), nq * nq_dir * 3, fid);
 
@@ -464,6 +502,17 @@ void fluct_input(double complex *dfk, double complex *dfmk,
 
   // Close binary file
   fclose(fid);
+
+  // Output
+  *out_n_atoms = n_atoms;
+  *out_nq = nq;
+  *out_dq = dq;
+  *out_nq_dir = nq_dir;
+  *out_n_files = n_files;
+  *out_qq = qq;
+  *out_dfk = dfk;
+  *out_dfmk = dfmk;
+  *out_cf = cf;
 
 }
 
@@ -509,65 +558,65 @@ void init_corr(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   // Allocate array to store the simulation box information
   sim_box = malloc(sizeof(double) * 3);
   if (sim_box == NULL){
-    printf("ERROR: Failed allocation for simulation box array\n");
+    fprintf(stderr,"ERROR: Failed allocation for simulation box array\n");
     exit(EXIT_FAILURE);
   }
 
   // Allocate arrays to store the configuration
   xx = malloc(sizeof(double) * n_atoms);
   if (xx == NULL){
-    printf("ERROR: Failed allocation for configuration array (xx)\n");
+    fprintf(stderr,"ERROR: Failed allocation for configuration array (xx)\n");
     exit(EXIT_FAILURE);
   }
   yy = malloc(sizeof(double) * n_atoms);
   if (yy == NULL){
-    printf("ERROR: Failed allocation for configuration array (yy)\n");
+    fprintf(stderr,"ERROR: Failed allocation for configuration array (yy)\n");
     exit(EXIT_FAILURE);
   }
   zz = malloc(sizeof(double) * n_atoms);
   if (zz == NULL){
-    printf("ERROR: Failed allocation for configuration array (zz)\n");
+    fprintf(stderr,"ERROR: Failed allocation for configuration array (zz)\n");
     exit(EXIT_FAILURE);
   }
   vx = malloc(sizeof(double) * n_atoms);
   if (vx == NULL){
-    printf("ERROR: Failed allocation for configuration array (vx)\n");
+    fprintf(stderr,"ERROR: Failed allocation for configuration array (vx)\n");
     exit(EXIT_FAILURE);
   }
   vy = malloc(sizeof(double) * n_atoms);
   if (vy == NULL){
-    printf("ERROR: Failed allocation for configuration array (vy)\n");
+    fprintf(stderr,"ERROR: Failed allocation for configuration array (vy)\n");
     exit(EXIT_FAILURE);
   }
   vz = malloc(sizeof(double) * n_atoms);
   if (vz == NULL){
-    printf("ERROR: Failed allocation for configuration array (vz)\n");
+    fprintf(stderr,"ERROR: Failed allocation for configuration array (vz)\n");
     exit(EXIT_FAILURE);
   }
 
   // Allocate array for wave-vector grid
   qq = malloc(sizeof(double) * nq * nq_dir * 3);
   if (qq == NULL){
-    printf("ERROR: Failed allocation for wave-vector grid array (qq)\n");
+    fprintf(stderr,"ERROR: Failed allocation for wave-vector grid array (qq)\n");
     exit(EXIT_FAILURE);
   }
 
-  // Allocate arrays to store density fluctuations
+  // Allocate arrays for fluctuations
   dfk = malloc(sizeof(double complex) * nq * nq_dir * n_files);
   if (dfk == NULL){
-    printf("ERROR: Failed allocation for fluctuations array (dfk)\n");
+    fprintf(stderr,"ERROR: Failed allocation for fluctuations array (dfk)\n");
     exit(EXIT_FAILURE);
   }
   dfmk = malloc(sizeof(double complex) * nq * nq_dir * n_files);
   if (dfmk == NULL){
-    printf("ERROR: Failed allocation for fluctuations array (dfmk) \n");
+    fprintf(stderr,"ERROR: Failed allocation for fluctuations array (dfmk) \n");
     exit(EXIT_FAILURE);
   }
 
-  // Allocate array to store the intermediate scattering function
+  // Allocate array for correlation function
   cf = malloc(sizeof(double complex) * nq * n_files);
   if (cf == NULL){
-    printf("ERROR: Failed allocation for correlation function\n");
+    fprintf(stderr,"ERROR: Failed allocation for correlation function\n");
     exit(EXIT_FAILURE);
   }
 
@@ -1075,7 +1124,7 @@ void check_consistency(int n_atoms_ref, int n_atoms_check, double LL_ref, double
   if (sim_box[1] < LL_check) LL_check = sim_box[1];
   if (sim_box[2] < LL_check) LL_check = sim_box[2];
   if ( abs(LL_ref-LL_check) > 1e-10 ) {
-      printf("ERROR: Simulation box not consistent with initialization\n");
+      fprintf(stderr,"ERROR: Simulation box not consistent with initialization\n");
       exit(EXIT_FAILURE);
   }  
   
