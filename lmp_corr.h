@@ -13,6 +13,7 @@ typedef struct {
   double num_theta;
   double num_phi;
   int num_threads;
+  double dt;
 
 } input;
 
@@ -28,20 +29,7 @@ void analyze_lmp(input in);
 
 void isf();
 
-
-void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
-              int *out_nq_dir, double **out_sim_box,
-              double **out_xx, double **out_yy, double **out_zz,
-              double **out_vx, double **out_vy, double **out_vz,
-              double **out_qq, double complex **out_drhok,
-              double complex **out_drhomk, double complex **out_fkt);
-
 void isf_output(double complex *fkt, double dq, int nq, int n_files);
-
-void isf_free(double *out_sim_box, double *xx, double *yy, double *zz,
-	      double *vx, double *vy, double *vz,
-	      double *qq, double complex *drhok, double complex *drhomk,
-	      double complex *fkt);
 
 
 // -------------------------------------------------------------------
@@ -50,20 +38,38 @@ void isf_free(double *out_sim_box, double *xx, double *yy, double *zz,
 
 void lvcf();
 
-void lvcf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
-              int *out_nq_dir, double **out_sim_box,
-              double **out_xx, double **out_yy, double **out_zz,
-              double **out_vx, double **out_vy, double **out_vz,
-              double **out_qq, double complex **out_dvk,
-              double complex **out_dvmk, double complex **out_ckt);
-
 void lvcf_output(double complex *ckt, double dq, int nq, int n_files);
 
-void lvcf_free(double *out_sim_box, double *xx, double *yy, double *zz,
-	      double *vx, double *vy, double *vz,
-	      double *qq, double complex *dvk, double complex *dvmk,
-	      double complex *ckt);
 
+// -------------------------------------------------------------------
+// FUNCTIONS USED TO COMPUTE THE FLUCTUATIONS
+// -------------------------------------------------------------------
+
+void compute_fluct(int n_atoms, double LL, double dq, int nq,
+                   int nq_dir, double *sim_box,
+                   double *xx, double *yy, double *zz,
+                   double *vx, double *vy, double *vz,
+                   double *qq, double complex *dfk, double complex *dfmk,
+                   bool vel);
+
+void fluct_output(double complex *dfk, double dq, int nq,
+                  int n_files, int nq_dir, bool vel);
+
+// -------------------------------------------------------------------
+// FUNCTIONS USED TO INITIALIZE AND FREE MEMORY
+// -------------------------------------------------------------------
+
+void init_corr(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
+               int *out_nq_dir, double **out_sim_box,
+               double **out_xx, double **out_yy, double **out_zz,
+               double **out_vx, double **out_vy, double **out_vz,
+               double **out_qq, double complex **out_dfk,
+               double complex **out_dfmk, double complex **out_cf);
+
+void free_corr(double *sim_box, double *xx, double *yy, double *zz,
+               double *vx, double *vy, double *vz,
+               double *qq, double complex *dfk, double complex *dfmk,
+               double complex *cf);
 
 // -------------------------------------------------------------------
 // FUNCTIONS USED TO ACCESS THE MULTIDIMENSIONAL ARRAYS

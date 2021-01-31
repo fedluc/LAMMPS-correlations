@@ -33,6 +33,8 @@ static struct argp_option options[] = {
    "Number of wave-vector directions (polar component)"},
   {"phi",   'p', "NUM_PHI", 0,
    "Number of wave-vector directions (azimutal component)"},
+  {"dt",   't', "TIME_STEP", 0,
+   "Time interval used to save the configurations"},
   { 0 }
 };
 
@@ -47,7 +49,8 @@ struct arguments
   int num_theta;
   int num_phi;
   int num_threads;
-  
+  double dt;
+
 };
 
 
@@ -111,9 +114,10 @@ int main (int argc, char **argv){
   arguments.lvcf = false;
   arguments.config_file  = "trajectories*.dat.gz";
   arguments.q_max = 10.0;
-  arguments.num_theta = 2;
-  arguments.num_phi = 2;
-  arguments.num_threads = 16;
+  arguments.num_theta = 1;
+  arguments.num_phi = 1;
+  arguments.num_threads = 1;
+  arguments.dt = 1;
 
   // Parse command line
   argp_parse (&argp, argc, argv, 0, 0, &arguments);
@@ -127,6 +131,7 @@ int main (int argc, char **argv){
   in.num_theta = arguments.num_theta;
   in.num_phi = arguments.num_phi;
   in.num_threads = arguments.num_threads;
+  in.dt = arguments.dt;
 
   // Analyze LAMMPS output
   double start = omp_get_wtime();

@@ -52,9 +52,8 @@ void analyze_lmp(input in) {
 void isf(){
 
   // Variables to store the information read from the file
-  int n_files = G_FILE_NAMES.gl_pathc;// Number of files
-  int time_step = 0; // Timestep
-  int n_atoms = 0, n_atoms_tmp; // Number of atoms
+  int n_files = G_FILE_NAMES.gl_pathc; // Number of files
+  int n_atoms = 0; // Number of atoms
   double *sim_box = NULL; // Simulation box
   double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
   double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
@@ -72,60 +71,16 @@ void isf(){
   double norm_fact;
 
   // Initialize
-  isf_init(&n_atoms, &LL, &dq, &nq,
-  	   &nq_dir, &sim_box,
-  	   &xx, &yy, &zz,
-  	   &vx, &vy, &vz, &qq,
-  	   &drhok, &drhomk, &fkt);
+  init_corr(&n_atoms, &LL, &dq, &nq,
+	    &nq_dir, &sim_box,
+	    &xx, &yy, &zz,
+	    &vx, &vy, &vz, &qq,
+	    &drhok, &drhomk, &fkt);
 
-  /* // Loop through the configuration files */
-  for (int ii=0; ii<n_files; ii++){
-    
-    // Read file content (it is assumed that one file contains one configuration)
-    printf("%s\n",G_FILE_NAMES.gl_pathv[ii]);
-    fflush(stdout);
-    read_file(ii, &time_step, &n_atoms_tmp, sim_box,
-  	      xx, yy, zz, vx, vy, vz);
-    
-    // check input consistency
-    check_consistency(n_atoms, n_atoms_tmp, LL, sim_box);
-
-
-    //Loop through the wave-vector magnitudes
-    #pragma omp parallel for
-    for (int jj=0; jj<nq; jj++){
-      int arr_idx;
-      double qx, qy, qz, qr, cosqr, sinqr;
-      //double cosqk_cum;
-      // Loop through the wave-vector directions
-      for (int kk=0; kk<nq_dir; kk++){
-    	arr_idx = idx3(jj,kk,ii,nq,nq_dir);
-	qx = qq[idx3(jj,kk,0,nq,nq_dir)];
-	qy = qq[idx3(jj,kk,1,nq,nq_dir)];
-	qz = qq[idx3(jj,kk,2,nq,nq_dir)];
-    	drhok[arr_idx] = 0.0 + I*0.0;
-    	drhomk[arr_idx] = 0.0 + I*0.0;
-	// double cosqr_cum = 0.0;
-    	// Loop through the atom positions
-    	for (int mm=0; mm<n_atoms; mm++){
-    	  qr = qx*xx[mm] + qy*yy[mm] + qz*zz[mm];
-	  /* if (jj==0 && (mm>n_atoms-10 || mm<10)) printf("%.16f %.16f %.16f %.16f %.16f %.16f %.16f\n", qr, */
-	  /* 						xx[mm], qq[idx3(jj,kk,0,nq,nq_dir)], */
-	  /* 						yy[mm], qq[idx3(jj,kk,1,nq,nq_dir)], */
-	  /* 						zz[mm], qq[idx3(jj,kk,2,nq,nq_dir)]); */
-    	  cosqr = cos(qr);
-    	  sinqr = sin(qr);
-	  drhok[arr_idx] += cosqr + I * sinqr;
-    	  drhomk[arr_idx] += cosqr - I * sinqr;
-	  /* cosqr_cum += cosqr; */
-	  /* if (jj==0 && (mm>n_atoms-10 || mm<10)) printf("%d %d %f %f %f %f %f\n", kk,  arr_idx, */
-	  /* 						qq[idx3(jj,kk,0,nq,nq_dir)], qq[idx3(jj,kk,1,nq,nq_dir)], qq[idx3(jj,kk,2,nq,nq_dir)], */
-	  /* 						creal(drhok[arr_idx]), cosqr_cum); */
-    	}
-      }
-    }
-
-  }
+  // Compute density fluctuations
+  compute_fluct(n_atoms, LL, dq, nq, nq_dir, sim_box,
+		xx, yy, zz, vx, vy, vz, qq, 
+		drhok, drhomk, false);
 
   // Compute intermediate scattering function (averaged over directions)
   int arr_idx;
@@ -152,37 +107,309 @@ void isf(){
       fkt[arr_idx] /= norm_fact;
     }
   }
-  /* for (int jj=0; jj<nq; jj++){ */
-  /*     for (int kk=0; kk<n_files; kk++){ */
-  /*     	norm_fact = 0.0; */
-  /*     	arr_idx = idx2(jj,kk,nq); */
-  /*     	fkt[arr_idx] = 0.0 + I * 0.0; */
-  /*     	for (int ll=0; ll<n_files-kk; ll++){ */
-  /*     	  fkt[arr_idx] += drhomk[idx3(jj,0,ll,nq,nq_dir)]* */
-  /*     	                  drhok[idx3(jj,0,kk+ll,nq,nq_dir)]; */
-  /*     	  norm_fact += 1.0; */
-  /*     	} */
-  /*     	fkt[arr_idx] /= norm_fact*n_atoms; */
-  /*     } */
-  /* } */
   
   // Write output
   isf_output(fkt, dq, nq, n_files);
 
   // Free memory
-  isf_free(sim_box, xx, yy, zz,
-  	   vx, vy, vz,
-  	   qq, drhok, drhomk,fkt);
+  free_corr(sim_box, xx, yy, zz,
+	    vx, vy, vz,
+	    qq, drhok, drhomk,fkt);
 
 }
 
-// ------ Initialize isf calculation ------
-void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
-	      int *out_nq_dir, double **out_sim_box, 
-	      double **out_xx, double **out_yy, double **out_zz,
-	      double **out_vx, double **out_vy, double **out_vz,
-	      double **out_qq, double complex **out_drhok, 
-	      double complex **out_drhomk, double complex **out_fkt){
+// ------ Write output for isf calculations ------
+void isf_output(double complex *fkt, double dq, int nq, int n_files){
+  
+  
+  FILE *fid;
+  
+  // Real part
+  fid = fopen("isf_real.dat", "w");
+  fprintf(fid, "ITEM: NUMBER OF WAVE-VECTORS (k)\n");
+  fprintf(fid, "%d\n", nq);
+  fprintf(fid, "ITEM: NUMBER OF TIME-STEPS (t)\n");
+  fprintf(fid, "%d\n", n_files);
+  fprintf(fid, "ITEM: INTERMEDIATE SCATTERING FUNCTION: k, t=0, t=dt, t=2*dt, ...\n"); 
+  for (int ii=0; ii<nq; ii++){
+    fprintf(fid, "%.8f ", (ii+1)*dq);
+    for (int jj=0; jj<n_files; jj++){
+      fprintf(fid, "%.8f ", creal(fkt[idx2(ii,jj,nq)]));
+    }
+    fprintf(fid, "\n");
+  }
+  fclose(fid);
+
+  // Imaginary part (should be close to zero)
+  fid = fopen("isf_imag.dat", "w");
+  fprintf(fid, "ITEM: NUMBER OF WAVE-VECTORS (k)\n");
+  fprintf(fid, "%d\n", nq);
+  fprintf(fid, "ITEM: NUMBER OF TIME-STEPS (t)\n");
+  fprintf(fid, "%d\n", n_files);
+  fprintf(fid, "ITEM: TIME-STEP (dt)\n");
+  fprintf(fid, "%f\n", G_IN.dt);
+  fprintf(fid, "ITEM: INTERMEDIATE SCATTERING FUNCTION: k, t=0, t=dt, t=2*dt, ...\n");
+  for (int ii=0; ii<nq; ii++){
+    fprintf(fid, "%.8f ", (ii+1)*dq);
+    for (int jj=0; jj<n_files; jj++){
+      fprintf(fid, "%.8f ", cimag(fkt[idx2(ii,jj,nq)]));
+    }
+    fprintf(fid, "\n");
+  }
+  fclose(fid);
+  
+}
+
+// -------------------------------------------------------------------
+// FUNCTIONS USED TO COMPUTE THE LONGITUDINAL VELOCITY CORRELATIONS
+// -------------------------------------------------------------------
+
+// ------ Compute intermediate scattering function ------
+void lvcf(){
+
+  // Variables to store the information read from the file
+  int n_files = G_FILE_NAMES.gl_pathc;// Number of files
+  int n_atoms = 0; // Number of atoms
+  double *sim_box = NULL; // Simulation box
+  double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
+  double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
+
+  // Variables to compute the velocity fluctuations
+  int nq, nq_dir; // Number of points in the wave-vector grid
+  double dq; // Resolution of the wave-vector grid
+  double LL; // Smallest simulation box size 
+  double *qq = NULL; // Wave-vector grid
+  double complex *dvk = NULL; // Velocity fluctuations
+  double complex *dvmk = NULL; // Velocity fluctuations (complex conjugate)
+
+  // Variables to compute the intermediate scattering function
+  double complex *ckt = NULL;
+  double norm_fact;
+
+  // Initialize
+  init_corr(&n_atoms, &LL, &dq, &nq,
+	    &nq_dir, &sim_box,
+	    &xx, &yy, &zz,
+	    &vx, &vy, &vz, &qq,
+	    &dvk, &dvmk, &ckt);
+
+  // Compute velocity fluctuations
+  compute_fluct(n_atoms, LL, dq, nq, nq_dir, sim_box,
+		xx, yy, zz, vx, vy, vz, qq, 
+		dvk, dvmk, true);
+
+  // Compute longitudinal velocity correlation function (averaged over directions)
+  int arr_idx;
+  for (int ii=0; ii<nq_dir; ii++){
+    for (int jj=0; jj<nq; jj++){
+      for (int kk=0; kk<n_files; kk++){
+  	arr_idx = idx2(jj,kk,nq);
+  	for (int ll=0; ll<n_files-kk; ll++){
+  	  ckt[arr_idx] += dvmk[idx3(jj,ii,ll,nq,nq_dir)]*
+  	                  dvk[idx3(jj,ii,kk+ll,nq,nq_dir)]/(nq_dir*n_atoms);
+  	}
+      }
+    }
+  }
+
+  // Normalize longitudinal velocity correlation function
+  for (int jj=0; jj<nq; jj++){
+    for (int kk=0; kk<n_files; kk++){
+      norm_fact = 0.0;
+      arr_idx = idx2(jj,kk,nq);
+      for (int ll=0; ll<n_files-kk; ll++){
+  	norm_fact+= 1.0;
+      }
+      ckt[arr_idx] /= norm_fact;
+    }
+  }
+  
+  // Write output
+  lvcf_output(ckt, dq, nq, n_files);
+
+  // Free memory
+  free_corr(sim_box, xx, yy, zz,
+	    vx, vy, vz,
+	    qq, dvk, dvmk, ckt);
+
+}
+
+
+// ------ Write output for lvcf calculations ------
+void lvcf_output(double complex *ckt, double dq, int nq, int n_files){
+  
+  
+  FILE *fid;
+  
+  // Real part
+  fid = fopen("lvcf_real.dat", "w");
+  fprintf(fid, "ITEM: NUMBER OF WAVE-VECTORS (k)\n");
+  fprintf(fid, "%d\n", nq);
+  fprintf(fid, "ITEM: NUMBER OF TIME-STEPS (t)\n");
+  fprintf(fid, "%d\n", n_files);
+  fprintf(fid, "ITEM: LONGITUDINAL VELOCITY CORRELATION FUNCTION: k, t=0, t=dt, t=2*dt, ...\n"); 
+  for (int ii=0; ii<nq; ii++){
+    fprintf(fid, "%.8f ", (ii+1)*dq);
+    for (int jj=0; jj<n_files; jj++){
+      fprintf(fid, "%.8f ", creal(ckt[idx2(ii,jj,nq)]));
+    }
+    fprintf(fid, "\n");
+  }
+  fclose(fid);
+
+  // Imaginary part (should be zero)
+  fid = fopen("lvcf_imag.dat", "w");
+  fprintf(fid, "ITEM: NUMBER OF WAVE-VECTORS (k)\n");
+  fprintf(fid, "%d\n", nq);
+  fprintf(fid, "ITEM: NUMBER OF TIME-STEPS (t)\n");
+  fprintf(fid, "%d\n", n_files);
+  fprintf(fid, "ITEM: TIME-STEP (dt)\n");
+  fprintf(fid, "%f\n", G_IN.dt);
+  fprintf(fid, "ITEM: LONGITUDINAL VELOCITY CORRELATION FUNCTION: k, t=0, t=dt, t=2*dt, ...\n"); 
+  for (int ii=0; ii<nq; ii++){
+    fprintf(fid, "%.8f ", (ii+1)*dq);
+    for (int jj=0; jj<n_files; jj++){
+      fprintf(fid, "%.8f ", cimag(ckt[idx2(ii,jj,nq)]));
+    }
+    fprintf(fid, "\n");
+  }
+  fclose(fid);
+  
+}
+
+// -------------------------------------------------------------------
+// FUNCTIONS USED TO COMPUTE THE FLUCTUATIONS 
+// -------------------------------------------------------------------
+
+// ------ Compute fluctuations ------
+void compute_fluct(int n_atoms, double LL, double dq, int nq,
+		   int nq_dir, double *sim_box,
+		   double *xx, double *yy, double *zz,
+		   double *vx, double *vy, double *vz, 
+		   double *qq, double complex *dfk, double complex *dfmk,
+		   bool vel){
+
+  // Variables 
+  int time_step = 0; 
+  int n_files = G_FILE_NAMES.gl_pathc;
+  int n_atoms_tmp;
+
+  // Loop through the configuration files
+  for (int ii=0; ii<n_files; ii++){
+    
+    // Read file content (it is assumed that one file contains one configuration)
+    printf("%s\n",G_FILE_NAMES.gl_pathv[ii]);
+    fflush(stdout);
+    read_file(ii, &time_step, &n_atoms_tmp, sim_box,
+  	      xx, yy, zz, vx, vy, vz);
+    
+    // check input consistency
+    check_consistency(n_atoms, n_atoms_tmp, LL, sim_box);
+
+
+    //Loop through the wave-vector magnitudes
+    #pragma omp parallel for
+    for (int jj=0; jj<nq; jj++){
+      int arr_idx;
+      double qx, qy, qz, qmag, qr, cosqr, sinqr, flong;
+      // Loop through the wave-vector directions
+      for (int kk=0; kk<nq_dir; kk++){
+    	arr_idx = idx3(jj,kk,ii,nq,nq_dir);
+	qx = qq[idx3(jj,kk,0,nq,nq_dir)];
+	qy = qq[idx3(jj,kk,1,nq,nq_dir)];
+	qz = qq[idx3(jj,kk,2,nq,nq_dir)];
+	qmag = sqrt(qx*qx + qy*qy + qz*qz);
+    	dfk[arr_idx] = 0.0 + I*0.0;
+    	dfmk[arr_idx] = 0.0 + I*0.0;
+    	// Loop through the atom positions
+    	for (int mm=0; mm<n_atoms; mm++){
+    	  qr = qx*xx[mm] + qy*yy[mm] + qz*zz[mm];
+    	  cosqr = cos(qr);
+    	  sinqr = sin(qr);
+	  if (vel) flong = (qx*vx[mm] + qy*vy[mm] + qz*vz[mm])/qmag; // Velocity fluctuations
+	  else flong = 1.0; // Density fluctuations
+	  dfk[arr_idx] += flong*(cosqr + I * sinqr);
+	  dfmk[arr_idx] += flong*(cosqr - I * sinqr);
+    	}
+      }
+    }
+  }
+
+  // Write output
+  fluct_output(dfk, dq, nq, n_files, nq_dir, vel);
+
+
+}
+
+// ------ Write output for lvcf calculations ------
+void fluct_output(double complex *dfk, double dq, int nq, 
+		  int n_files, int nq_dir, bool vel){
+  
+  
+  FILE *fid;
+  
+  // Real part
+  if (vel) fid = fopen("dv_real.dat", "w");
+  else fid = fopen("drho_real.dat", "w");
+  fprintf(fid, "ITEM: NUMBER OF WAVE-VECTORS (k)\n");
+  fprintf(fid, "%d\n", nq);
+  fprintf(fid, "ITEM: NUMBER OF TIME-STEPS (t)\n");
+  fprintf(fid, "%d\n", n_files);
+  fprintf(fid, "ITEM: TIME-STEP (dt)\n");
+  fprintf(fid, "%f\n", G_IN.dt);
+  fprintf(fid, "ITEM: NUMBER OF DIRECTIONS\n");
+  fprintf(fid, "%d\n", nq_dir);
+  for (int ii=0; ii<nq_dir; ii++){
+    if (vel) fprintf(fid, "ITEM: VELOCITY FLUCTUATIONS: k, t=0, t=dt, t=2*dt, ...\n"); 
+    else fprintf(fid, "ITEM: DENSITY FLUCTUATIONS: k, t=0, t=dt, t=2*dt, ...\n");
+    for (int jj=0; jj<nq; jj++){
+      fprintf(fid, "%.8f ", (jj+1)*dq);
+      for (int kk=0; kk<n_files; kk++){
+	fprintf(fid, "%.8f ", creal(dfk[idx3(jj,ii,kk,nq,nq_dir)]));
+      }
+      fprintf(fid, "\n");
+    }
+  }
+  fclose(fid);
+  
+  // Imaginary
+  if (vel) fid = fopen("dv_imag.dat", "w");
+  else fid = fopen("drho_imag.dat", "w");
+  fprintf(fid, "ITEM: NUMBER OF WAVE-VECTORS (k)\n");
+  fprintf(fid, "%d\n", nq);
+  fprintf(fid, "ITEM: NUMBER OF TIME-STEPS (t)\n");
+  fprintf(fid, "%d\n", n_files);
+  fprintf(fid, "ITEM: TIME-STEP (dt)\n");
+  fprintf(fid, "%f\n", G_IN.dt);
+  fprintf(fid, "ITEM: NUMBER OF DIRECTIONS\n");
+  fprintf(fid, "%d\n", nq_dir);
+  for (int ii=0; ii<nq_dir; ii++){
+    if (vel) fprintf(fid, "ITEM: VELOCITY FLUCTUATIONS: k, t=0, t=dt, t=2*dt, ...\n"); 
+    else fprintf(fid, "ITEM: DENSITY FLUCTUATIONS: k, t=0, t=dt, t=2*dt, ...\n");
+    for (int jj=0; jj<nq; jj++){
+      fprintf(fid, "%.8f ", (jj+1)*dq);
+      for (int kk=0; kk<n_files; kk++){
+	fprintf(fid, "%.8f ", cimag(dfk[idx3(jj,ii,kk,nq,nq_dir)]));
+      }
+      fprintf(fid, "\n");
+    }
+  }
+  fclose(fid);
+  
+}
+
+
+// -------------------------------------------------------------------
+// FUNCTIONS USED TO INITIALIZE AND FREE MEMORY
+// -------------------------------------------------------------------
+
+// ------ Initialize calculation for correlation functions ------
+void init_corr(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
+	       int *out_nq_dir, double **out_sim_box, 
+	       double **out_xx, double **out_yy, double **out_zz,
+	       double **out_vx, double **out_vy, double **out_vz,
+	       double **out_qq, double complex **out_dfk,
+	       double complex **out_dfmk, double complex **out_cf){
 
   // Variables 
   int n_atoms = 0, nq = 0, n_files = G_FILE_NAMES.gl_pathc, 
@@ -190,7 +417,7 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   double LL, dq, dtheta, dphi, qtmp, qsint, qcost;
   double *sim_box = NULL, *xx = NULL, *yy = NULL, *zz = NULL,
     *vx = NULL, *vy = NULL, *vz = NULL, *qq = NULL;
-  double complex *drhok = NULL, *drhomk = NULL, *fkt = NULL;
+  double complex *dfk = NULL, *dfmk = NULL, *cf = NULL;
   
   // Read the first configuration file and allocate the necessary arrays
   // Note: it is assumed that all files refer to the same NVT 
@@ -257,21 +484,21 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   }
 
   // Allocate arrays to store density fluctuations
-  drhok = malloc(sizeof(double complex) * nq * nq_dir * n_files);
-  if (drhok == NULL){
-    printf("ERROR: Failed allocation for density fluctuations array (drhok)\n");
+  dfk = malloc(sizeof(double complex) * nq * nq_dir * n_files);
+  if (dfk == NULL){
+    printf("ERROR: Failed allocation for fluctuations array (dfk)\n");
     exit(EXIT_FAILURE);
   }
-  drhomk = malloc(sizeof(double complex) * nq * nq_dir * n_files);
-  if (drhomk == NULL){
-    printf("ERROR: Failed allocation for density fluctuations array (drhomk)\n");
+  dfmk = malloc(sizeof(double complex) * nq * nq_dir * n_files);
+  if (dfmk == NULL){
+    printf("ERROR: Failed allocation for fluctuations array (dfmk) \n");
     exit(EXIT_FAILURE);
   }
 
   // Allocate array to store the intermediate scattering function
-  fkt = malloc(sizeof(double complex) * nq * n_files);
-  if (fkt == NULL){
-    printf("ERROR: Failed allocation for intermediate scattering function (drhok)\n");
+  cf = malloc(sizeof(double complex) * nq * n_files);
+  if (cf == NULL){
+    printf("ERROR: Failed allocation for correlation function\n");
     exit(EXIT_FAILURE);
   }
 
@@ -314,7 +541,7 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   // Initialize intermediate scattering function
   for (int ii=0; ii<nq; ii++){
       for (int jj=0; jj<n_files; jj++){
-  	fkt[idx2(ii,jj,nq)] = 0.0 + I*0.0;
+  	cf[idx2(ii,jj,nq)] = 0.0 + I*0.0;
       }
   }
 
@@ -332,47 +559,17 @@ void isf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
   *out_vy = vy;
   *out_vz = vz;
   *out_qq = qq;
-  *out_drhok = drhok;
-  *out_drhomk = drhomk;
-  *out_fkt = fkt;
+  *out_dfk = dfk;
+  *out_dfmk = dfmk;
+  *out_cf = cf;
 
 }
 
-// ------ Write output for isf calculations ------
-void isf_output(double complex *fkt, double dq, int nq, int n_files){
-  
-  
-  FILE *fid;
-  
-  // Real part
-  fid = fopen("isf_real.dat", "w");
-  for (int ii=0; ii<nq; ii++){
-    fprintf(fid, "%.8f ", (ii+1)*dq);
-    for (int jj=0; jj<n_files; jj++){
-      fprintf(fid, "%.8f ", creal(fkt[idx2(ii,jj,nq)]));
-    }
-    fprintf(fid, "\n");
-  }
-  fclose(fid);
-
-  // Imaginary part (should be close to zero)
-  fid = fopen("isf_imag.dat", "w");
-  for (int ii=0; ii<nq; ii++){
-    fprintf(fid, "%.8f ", (ii+1)*dq);
-    for (int jj=0; jj<n_files; jj++){
-      fprintf(fid, "%.8f ", cimag(fkt[idx2(ii,jj,nq)]));
-    }
-    fprintf(fid, "\n");
-  }
-  fclose(fid);
-  
-}
-
-// ------ Free arrays associated with isf calculation ------
-void isf_free(double *sim_box, double *xx, double *yy, double *zz,
-	      double *vx, double *vy, double *vz,
-	      double *qq, double complex *drhok, double complex *drhomk,
-	      double complex *fkt){
+// ------ Free arrays associated with correlation function calculation ------
+void free_corr(double *sim_box, double *xx, double *yy, double *zz,
+	       double *vx, double *vy, double *vz,
+	       double *qq, double complex *dfk, double complex *dfmk,
+	       double complex *cf){
 
   free(sim_box);
   free(xx);
@@ -382,324 +579,12 @@ void isf_free(double *sim_box, double *xx, double *yy, double *zz,
   free(vy);
   free(vz);
   free(qq);
-  free(drhok);
-  free(drhomk);
-  free(fkt);
+  free(dfk);
+  free(dfmk);
+  free(cf);
 
 }
 
-// -------------------------------------------------------------------
-// FUNCTIONS USED TO COMPUTE THE LONGITUDINAL VELOCITY CORRELATIONS
-// -------------------------------------------------------------------
-
-// ------ Compute intermediate scattering function ------
-void lvcf(){
-
-  // Variables to store the information read from the file
-  int n_files = G_FILE_NAMES.gl_pathc;// Number of files
-  int time_step = 0; // Timestep
-  int n_atoms = 0, n_atoms_tmp; // Number of atoms
-  double *sim_box = NULL; // Simulation box
-  double *xx = NULL, *yy = NULL, *zz = NULL; // Coordinates
-  double *vx = NULL, *vy = NULL, *vz = NULL; // Velocities
-
-  // Variables to compute the velocity fluctuations
-  int nq, nq_dir; // Number of points in the wave-vector grid
-  double dq; // Resolution of the wave-vector grid
-  double LL; // Smallest simulation box size 
-  double *qq = NULL; // Wave-vector grid
-  double complex *dvk = NULL; // Velocity fluctuations
-  double complex *dvmk = NULL; // Velocity fluctuations (complex conjugate)
-
-  // Variables to compute the intermediate scattering function
-  double complex *ckt = NULL;
-  double norm_fact;
-
-  // Initialize
-  lvcf_init(&n_atoms, &LL, &dq, &nq,
-  	   &nq_dir, &sim_box,
-  	   &xx, &yy, &zz,
-  	   &vx, &vy, &vz, &qq,
-  	   &dvk, &dvmk, &ckt);
-
-  /* // Loop through the configuration files */
-  for (int ii=0; ii<n_files; ii++){
-    
-    // Read file content (it is assumed that one file contains one configuration)
-    printf("%s\n",G_FILE_NAMES.gl_pathv[ii]);
-    fflush(stdout);
-    read_file(ii, &time_step, &n_atoms_tmp, sim_box,
-  	      xx, yy, zz, vx, vy, vz);
-    
-    // check input consistency
-    check_consistency(n_atoms, n_atoms_tmp, LL, sim_box);
-
-
-    //Loop through the wave-vector magnitudes
-    #pragma omp parallel for
-    for (int jj=0; jj<nq; jj++){
-      int arr_idx;
-      double qx, qy, qz, qmag, qr, cosqr, sinqr, vlong;
-      // Loop through the wave-vector directions
-      for (int kk=0; kk<nq_dir; kk++){
-    	arr_idx = idx3(jj,kk,ii,nq,nq_dir);
-	qx = qq[idx3(jj,kk,0,nq,nq_dir)];
-	qy = qq[idx3(jj,kk,1,nq,nq_dir)];
-	qz = qq[idx3(jj,kk,2,nq,nq_dir)];
-	qmag = sqrt(qx*qx + qy*qy + qz*qz);
-    	dvk[arr_idx] = 0.0 + I*0.0;
-    	dvmk[arr_idx] = 0.0 + I*0.0;
-    	// Loop through the atom positions
-    	for (int mm=0; mm<n_atoms; mm++){
-    	  qr = qx*xx[mm] + qy*yy[mm] + qz*zz[mm];
-	  vlong = (qx*vx[mm] + qy*vy[mm] + qz*vz[mm])/qmag;
-    	  cosqr = cos(qr);
-    	  sinqr = sin(qr);
-	  dvk[arr_idx] += vlong*(cosqr + I * sinqr);
-    	  dvmk[arr_idx] += vlong*(cosqr - I * sinqr);	 
-    	}
-      }
-    }
-
-  }
-
-  // Compute longitudinal velocity correlation function (averaged over directions)
-  int arr_idx;
-  for (int ii=0; ii<nq_dir; ii++){
-    for (int jj=0; jj<nq; jj++){
-      for (int kk=0; kk<n_files; kk++){
-  	arr_idx = idx2(jj,kk,nq);
-  	for (int ll=0; ll<n_files-kk; ll++){
-  	  ckt[arr_idx] += dvmk[idx3(jj,ii,ll,nq,nq_dir)]*
-  	                  dvk[idx3(jj,ii,kk+ll,nq,nq_dir)]/(nq_dir*n_atoms);
-  	}
-      }
-    }
-  }
-
-  // Normalize longitudinal velocity correlation function
-  for (int jj=0; jj<nq; jj++){
-    for (int kk=0; kk<n_files; kk++){
-      norm_fact = 0.0;
-      arr_idx = idx2(jj,kk,nq);
-      for (int ll=0; ll<n_files-kk; ll++){
-  	norm_fact+= 1.0;
-      }
-      ckt[arr_idx] /= norm_fact;
-    }
-  }
-  
-  // Write output
-  lvcf_output(ckt, dq, nq, n_files);
-
-  // Free memory
-  lvcf_free(sim_box, xx, yy, zz,
-  	   vx, vy, vz,
-  	   qq, dvk, dvmk,ckt);
-
-}
-
-// ------ Initialize lvcf calculation ------
-void lvcf_init(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
-	      int *out_nq_dir, double **out_sim_box, 
-	      double **out_xx, double **out_yy, double **out_zz,
-	      double **out_vx, double **out_vy, double **out_vz,
-	      double **out_qq, double complex **out_dvk, 
-	      double complex **out_dvmk, double complex **out_ckt){
-
-  // Variables 
-  int n_atoms = 0, nq = 0, n_files = G_FILE_NAMES.gl_pathc, 
-    nq_dir = 0, idx_dir = 0;
-  double LL, dq, dtheta, dphi, qtmp, qsint, qcost;
-  double *sim_box = NULL, *xx = NULL, *yy = NULL, *zz = NULL,
-    *vx = NULL, *vy = NULL, *vz = NULL, *qq = NULL;
-  double complex *dvk = NULL, *dvmk = NULL, *ckt = NULL;
-  
-  // Read the first configuration file and allocate the necessary arrays
-  // Note: it is assumed that all files refer to the same NVT 
-  // simulation. i.e. the number of atoms and the simulation box, 
-  // remain constant while reading the files. If this is 
-  // not the case (which could happen for NpT or for grand-canonical
-  // simulations) the code will stop and produce an error
-  read_file_init(&n_atoms, &LL);
-
-  //Wave-vector grid
-  dq = 2.0*M_PI/LL;
-  nq = (int)G_IN.q_max/dq;
-  dtheta = M_PI/(G_IN.num_theta-1);
-  dphi = 2.0*M_PI/G_IN.num_phi;
-  if (G_IN.num_theta==1)
-    nq_dir = 1;
-  else
-    nq_dir = G_IN.num_phi*(G_IN.num_theta-2) + 2;
-
-  // Allocate array to store the simulation box information
-  sim_box = malloc(sizeof(double) * 3);
-  if (sim_box == NULL){
-    printf("ERROR: Failed allocation for simulation box array\n");
-    exit(EXIT_FAILURE);
-  }
-
-  // Allocate arrays to store the configuration
-  xx = malloc(sizeof(double) * n_atoms);
-  if (xx == NULL){
-    printf("ERROR: Failed allocation for configuration array (xx)\n");
-    exit(EXIT_FAILURE);
-  }
-  yy = malloc(sizeof(double) * n_atoms);
-  if (yy == NULL){
-    printf("ERROR: Failed allocation for configuration array (yy)\n");
-    exit(EXIT_FAILURE);
-  }
-  zz = malloc(sizeof(double) * n_atoms);
-  if (zz == NULL){
-    printf("ERROR: Failed allocation for configuration array (zz)\n");
-    exit(EXIT_FAILURE);
-  }
-  vx = malloc(sizeof(double) * n_atoms);
-  if (vx == NULL){
-    printf("ERROR: Failed allocation for configuration array (vx)\n");
-    exit(EXIT_FAILURE);
-  }
-  vy = malloc(sizeof(double) * n_atoms);
-  if (vy == NULL){
-    printf("ERROR: Failed allocation for configuration array (vy)\n");
-    exit(EXIT_FAILURE);
-  }
-  vz = malloc(sizeof(double) * n_atoms);
-  if (vz == NULL){
-    printf("ERROR: Failed allocation for configuration array (vz)\n");
-    exit(EXIT_FAILURE);
-  }
-
-  // Allocate array for wave-vector grid
-  qq = malloc(sizeof(double) * nq * nq_dir * 3);
-  if (qq == NULL){
-    printf("ERROR: Failed allocation for wave-vector grid array (qq)\n");
-    exit(EXIT_FAILURE);
-  }
-
-  // Allocate arrays to store velocity fluctuations
-  dvk = malloc(sizeof(double complex) * nq * nq_dir * n_files);
-  if (dvk == NULL){
-    printf("ERROR: Failed allocation for velocity fluctuations array (dvk)\n");
-    exit(EXIT_FAILURE);
-  }
-  dvmk = malloc(sizeof(double complex) * nq * nq_dir * n_files);
-  if (dvmk == NULL){
-    printf("ERROR: Failed allocation for velocity fluctuations array (dvmk)\n");
-    exit(EXIT_FAILURE);
-  }
-
-  // Allocate array to store the longitudinal velocity correlation function
-  ckt = malloc(sizeof(double complex) * nq * n_files);
-  if (ckt == NULL){
-    printf("ERROR: Failed allocation for longitudinal velocity correlation function (dvk)\n");
-    exit(EXIT_FAILURE);
-  }
-
-  // Initialize the wave-vector grid
-  for (int ii=0; ii<nq; ii++){
-    qtmp = (ii+1)*dq;
-    // theta = 0 
-    qq[idx3(ii, 0, 0, nq, nq_dir)] = 0;
-    qq[idx3(ii, 0, 1, nq, nq_dir)] = 0;
-    qq[idx3(ii, 0, 2, nq, nq_dir)] = qtmp;
-    // theta > 0 (if necessary)
-    if (nq_dir > 1) {
-      for (int jj=0; jj<G_IN.num_theta-2; jj++){
-	qsint = qtmp * sin(dtheta*(jj+1));
-	qcost = qtmp * cos(dtheta*(jj+1));
-	for (int kk=0; kk<G_IN.num_phi; kk++){
-	  idx_dir = jj*G_IN.num_phi + kk + 1;
-	  qq[idx3(ii, idx_dir, 0, nq, nq_dir)] = qsint * cos(dphi*kk);
-	  qq[idx3(ii, idx_dir, 1, nq, nq_dir)] = qsint * sin(dphi*kk);
-	  qq[idx3(ii, idx_dir, 2, nq, nq_dir)] = qcost;
-	}
-      }
-      // theta = pi
-      qq[idx3(ii, nq_dir-1, 0, nq, nq_dir)] = 0;
-      qq[idx3(ii, nq_dir-1, 1, nq, nq_dir)] = 0;
-      qq[idx3(ii, nq_dir-1, 2, nq, nq_dir)] = -qtmp;
-    }
-  }
-
-  // Initialize longitudinal velocity correlation function
-  for (int ii=0; ii<nq; ii++){
-      for (int jj=0; jj<n_files; jj++){
-  	ckt[idx2(ii,jj,nq)] = 0.0 + I*0.0;
-      }
-  }
-
-  // Output
-  *out_n_atoms = n_atoms;
-  *out_LL = LL;
-  *out_dq = dq;
-  *out_nq = nq;
-  *out_nq_dir = nq_dir;
-  *out_sim_box = sim_box;
-  *out_xx = xx;
-  *out_yy = yy;
-  *out_zz = zz;
-  *out_vx = vx;
-  *out_vy = vy;
-  *out_vz = vz;
-  *out_qq = qq;
-  *out_dvk = dvk;
-  *out_dvmk = dvmk;
-  *out_ckt = ckt;
-
-}
-
-// ------ Write output for lvcf calculations ------
-void lvcf_output(double complex *ckt, double dq, int nq, int n_files){
-  
-  
-  FILE *fid;
-  
-  // Real part
-  fid = fopen("lvcf_real.dat", "w");
-  for (int ii=0; ii<nq; ii++){
-    fprintf(fid, "%.8f ", (ii+1)*dq);
-    for (int jj=0; jj<n_files; jj++){
-      fprintf(fid, "%.8f ", creal(ckt[idx2(ii,jj,nq)]));
-    }
-    fprintf(fid, "\n");
-  }
-  fclose(fid);
-
-  // Imaginary part (should be close to zero)
-  fid = fopen("lvcf_imag.dat", "w");
-  for (int ii=0; ii<nq; ii++){
-    fprintf(fid, "%.8f ", (ii+1)*dq);
-    for (int jj=0; jj<n_files; jj++){
-      fprintf(fid, "%.8f ", cimag(ckt[idx2(ii,jj,nq)]));
-    }
-    fprintf(fid, "\n");
-  }
-  fclose(fid);
-  
-}
-
-// ------ Free arrays associated with lvcf calculation ------
-void lvcf_free(double *sim_box, double *xx, double *yy, double *zz,
-	      double *vx, double *vy, double *vz,
-	      double *qq, double complex *dvk, double complex *dvmk,
-	      double complex *ckt){
-
-  free(sim_box);
-  free(xx);
-  free(yy);
-  free(zz);
-  free(vx);
-  free(vy);
-  free(vz);
-  free(qq);
-  free(dvk);
-  free(dvmk);
-  free(ckt);
-
-}
 
 // -------------------------------------------------------------------
 // FUNCTIONS USED TO ACCESS THE MULTIDIMENSIONAL ARRAYS
