@@ -400,7 +400,7 @@ void fluct_output(double complex *dfk, double complex *dfmk,
   fwrite(&n_atoms, sizeof(int), 1, fid);
 
   // Wave-vectors
-  fwrite(qq, sizeof(double complex), nq * nq_dir * 3, fid);
+  fwrite(qq, sizeof(double), nq * nq_dir * 3, fid);
 
   // Fluctuations
   fwrite(dfk, sizeof(double complex), nq * nq_dir * n_files, fid);
@@ -483,16 +483,8 @@ void fluct_input(int *out_n_atoms, double *out_dq, int *out_nq,  int *out_nq_dir
     exit(EXIT_FAILURE);
   }
 
-  // Allocate array for correlation function
-  cf = malloc(sizeof(double complex) * nq * n_files);
-  if (cf == NULL){
-    fprintf(stderr,"ERROR: Failed allocation for correlation function\n");
-    exit(EXIT_FAILURE);
-  }
-
-
   // Wave-vectors
-  fread(qq, sizeof(double complex), nq * nq_dir * 3, fid);
+  fread(qq, sizeof(double), nq * nq_dir * 3, fid);
 
   // Fluctuations
   fread(dfk, sizeof(double complex), nq * nq_dir * n_files, fid);
@@ -502,6 +494,20 @@ void fluct_input(int *out_n_atoms, double *out_dq, int *out_nq,  int *out_nq_dir
 
   // Close binary file
   fclose(fid);
+
+  // Allocate array for correlation function
+  cf = malloc(sizeof(double complex) * nq * n_files);
+  if (cf == NULL){
+    fprintf(stderr,"ERROR: Failed allocation for correlation function\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Initialize correlation function
+  for (int ii=0; ii<nq; ii++){
+      for (int jj=0; jj<n_files; jj++){
+  	cf[idx2(ii,jj,nq)] = 0.0 + I*0.0;
+      }
+  }
 
   // Output
   *out_n_atoms = n_atoms;
@@ -656,7 +662,7 @@ void init_corr(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
     }
   }
 
-  // Initialize intermediate scattering function
+  // Initialize correlation function
   for (int ii=0; ii<nq; ii++){
       for (int jj=0; jj<n_files; jj++){
   	cf[idx2(ii,jj,nq)] = 0.0 + I*0.0;
