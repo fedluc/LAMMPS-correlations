@@ -6,8 +6,7 @@
 
 typedef struct {
 
-  bool isf;
-  bool lvcf;
+  bool vel;
   char *config_file;
   char *fluct_file;
   double q_max;
@@ -24,43 +23,29 @@ typedef struct {
 
 void analyze_lmp(input in);
 
-// -------------------------------------------------------------------
-// FUNCTIONS USED TO COMPUTE THE INTERMEDIATE SCATTERING FUNCTION
-// -------------------------------------------------------------------
-
-void isf();
-
-void isf_output(double complex *fkt, double dq, int nq, int n_files);
-
-
-// -------------------------------------------------------------------
-// FUNCTIONS USED TO COMPUTE THE LONGITUDINAL VELOCITY CORRELATIONS
-// -------------------------------------------------------------------
-
-void lvcf();
-
-void lvcf_output(double complex *ckt, double dq, int nq, int n_files);
-
 
 // -------------------------------------------------------------------
 // FUNCTIONS USED TO COMPUTE THE FLUCTUATIONS
 // -------------------------------------------------------------------
 
+void fluct();
+
 void compute_fluct(int n_atoms, double LL, double dq, int nq,
                    int nq_dir, double *sim_box,
                    double *xx, double *yy, double *zz,
                    double *vx, double *vy, double *vz,
-                   double *qq, double complex *dfk, double complex *dfmk,
+                   double *qq, double complex *dfk,
                    bool vel);
 
-void fluct_output(double complex *dfk, double complex *dfmk,
-                  double *qq, double dq, int nq,
+void fluct_output(double complex *dfk, double *qq, double dq, int nq,
                   int n_files, int nq_dir, int n_atoms, bool vel);
 
 void fluct_input(int *out_n_atoms, double *out_dq, int *out_nq,  int *out_nq_dir,
                  int *out_n_files, double **out_qq,
-                 double complex **out_dfk, double complex **out_dfmk,
-                 double complex **out_cf, bool vel);
+                 double complex **out_dfk, bool vel);
+
+void fluct_bin2dat(double complex *dfk, double dq, int nq, int n_files,
+                   int nq_dir, bool vel);
 
 // -------------------------------------------------------------------
 // FUNCTIONS USED TO INITIALIZE AND FREE MEMORY
@@ -70,13 +55,11 @@ void init_corr(int *out_n_atoms, double *out_LL, double *out_dq, int *out_nq,
                int *out_nq_dir, double **out_sim_box,
                double **out_xx, double **out_yy, double **out_zz,
                double **out_vx, double **out_vy, double **out_vz,
-               double **out_qq, double complex **out_dfk,
-               double complex **out_dfmk, double complex **out_cf);
+               double **out_qq, double complex **out_dfk);
 
 void free_corr(double *sim_box, double *xx, double *yy, double *zz,
                double *vx, double *vy, double *vz,
-               double *qq, double complex *dfk, double complex *dfmk,
-               double complex *cf);
+               double *qq, double complex *dfk);
 
 // -------------------------------------------------------------------
 // FUNCTIONS USED TO ACCESS THE MULTIDIMENSIONAL ARRAYS

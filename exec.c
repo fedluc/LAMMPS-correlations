@@ -23,10 +23,8 @@ static struct argp_option options[] = {
    "File(s) with the configuration (wild-cards are accepted)"}, 
   {"dq",  'q', "DQ_MAX", 0,
   "Wave-vector cutoff"},
-  {"isf",   'd', 0, 0,
-   "Use this flag to compute the intermediate scattering function" },
-  {"lvcf",   'l', 0, 0,
-   "Use this flag to compute the longitudinal velocity correlation function" },
+  {"vel",   'v', 0, 0,
+   "Use this flag to compute the velocity fluctuations" },
   {"num_threads",   'n', "NUM_THREADS", 0,
    "Number of threads to use for the parallel computations with openMP"},
   {"theta",   't', "NUM_THETA", 0,
@@ -44,8 +42,7 @@ static struct argp_option options[] = {
 struct arguments
 {
 
-  bool isf;
-  bool lvcf;
+  bool vel;
   char *config_file;
   char *fluct_file;
   double q_max;
@@ -76,12 +73,6 @@ parse_opt (int key, char *arg, struct argp_state *state)
     case 'f':
       arguments->fluct_file = arg;
       break;
-    case 'i':
-      arguments->isf = true;
-      break;
-    case 'l':
-      arguments->lvcf = true;
-      break;
     case 'n':
       arguments->num_threads = atoi(arg);
       break;
@@ -93,6 +84,9 @@ parse_opt (int key, char *arg, struct argp_state *state)
       break;
     case 't':
       arguments->num_theta = atoi(arg);
+      break;
+    case 'v':
+      arguments->vel = true;
       break;
 
     case ARGP_KEY_ARG:
@@ -119,8 +113,7 @@ int main (int argc, char **argv){
   struct arguments arguments;
 
   // Default values for optional arguments
-  arguments.isf = false;
-  arguments.lvcf = false;
+  arguments.vel = false;
   arguments.config_file  = "trajectories*.dat.gz";
   arguments.fluct_file  = "NO-INPUT";
   arguments.q_max = 10.0;
@@ -134,8 +127,7 @@ int main (int argc, char **argv){
 
   // Prepare input for LAMMPS analyzer
   input in;
-  in.isf = arguments.isf;
-  in.lvcf = arguments.lvcf;
+  in.vel = arguments.vel;
   in.config_file = arguments.config_file;
   in.fluct_file = arguments.fluct_file;
   in.q_max = arguments.q_max;
