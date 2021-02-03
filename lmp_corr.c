@@ -217,8 +217,7 @@ void fluct_input(int *out_n_atoms, double *out_dq, int *out_nq,  int *out_nq_dir
 
   // Open binary file
   FILE *fid = NULL;
-  if (vel) fid = fopen("vel_fluct.bin", "rb");
-  else fid = fopen("dens_fluct.bin", "rb");
+  fid =fopen(G_IN.fluct_file, "rb");
   if (fid == NULL) {
     fprintf(stderr,"Error while opening fluctuation file\n");
     exit(EXIT_FAILURE);
